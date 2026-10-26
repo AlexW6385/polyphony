@@ -9,108 +9,164 @@ react to them; values argue, associate, wander, get tired, and eventually
 settle on something — or let it go. Each voice is an independent AI agent
 with its own values and temperament. Nobody coordinates them.
 
-Humans and the outside world are not special participants. They are just
-two more sources of thoughts that enter the same stream. Several topics can
-be thrown in at once, one can be added halfway through, and any of them
-can drift into something else or connect to something from long ago.
+The person and the outside world are not special participants. They are two
+more sources of thoughts entering the same stream. Several topics can be
+thrown in at once, one can be added halfway through, and any of them can
+drift into something else or connect to something from long ago.
 
-## The one rule: as little framework as possible
+## Vocabulary
 
-Everything that is *behaviour* is decided by a model, not by code:
+| word | meaning |
+|---|---|
+| **voice** | one agent: a set of values and a temperament, defined by one text file |
+| **thought** | one entry in the stream, from a voice, the person, or the world |
+| **stream** | the single shared, ordered record of thoughts |
+| **listen** | a voice reading the stream and deciding whether to speak; its result (mood, reason, speak or not) is itself recorded and visible to everyone |
+| **forming** | the state of a voice that has decided to speak and is composing; visible to the others |
+| **sense** | a standing instruction for what to bring in from the outside world (news, feeds); a sense periodically fetches and drops thoughts into the stream |
+| **cadence** | a decision procedure: the person poses a resolution, the voices vote, the mind resolves |
+
+## Two principles
+
+**Give as much information as possible.** Inside a head nothing is hidden.
+Every voice sees the whole recent stream, a few random older thoughts, every
+other voice's latest *listen* (whether it chose to speak, its mood, its
+reason), and which voices are currently *forming* a thought. If everyone is
+bored, each voice can see that everyone is bored. If three voices are
+already forming replies, a fourth can see that and decide to wait.
+
+**Prescribe as little as possible.** Everything that is *behaviour* is a
+model judgement, not code:
 
 - whether a voice speaks now, waits, or stays quiet
 - whether it is bored, irritated, curious, or done
-- whether the mind should decide and stop
+- whether the mind is repeating itself and should stop
+- whether a thread has drifted so far from what the person or the world
+  brought in that it is time to pause
 - whether an old thought is worth pulling back in
 
 Code owns only what a model cannot: the stream, its ordering, persistence,
 fan-out, and concurrency. There is no topic object, no session, no turn
 order, no loop cap, no coordinator. "Quiet" is not a state the code enters;
-it is simply what happens when every voice looks at the stream and chooses
-not to speak.
+it is what happens when every voice listens and chooses not to speak.
 
-Voices are **stateless by design**. Each time a voice looks at the stream
-it looks fresh: it has its values and temperament, and it sees what was
-said (including what "it" said earlier), but it is not obliged to agree
-with its past self. Continuity of personality comes from the prompt, not
-from memory.
+Negative feedback against extremes (endless repetition, runaway tangents,
+voices talking only to each other) is also left to the model, through the
+listen prompt. The anchor is that original thoughts come only from the
+person or from senses the person chose; the voices' job is to work on
+those, not to entertain themselves. The prompt says so, and says that a
+long drift far from any origin is a reason to stop; nothing in the code
+enforces it.
+
+Voices are **stateless by design**. Each time a voice listens it looks
+fresh: it has its values and temperament, and it sees what was said
+(including what "it" said earlier), but it is not obliged to agree with its
+past self. Continuity comes from the voice file, not from memory.
 
 ## Components
 
 ```text
-human / world ──▶ POST /thoughts ──┐
-                                   ▼
-                              ┌─────────┐   append   ┌────────────┐
-   voice A ──┐                │         │ ─────────▶ │ PostgreSQL │  thoughts (seq = order of record)
-   voice B ──┼── append ────▶ │ Stream  │            │            │  attention (who considered speaking, why)
-   voice C ──┘                │         │ ─────────▶ │ Redis      │  recent window (list), fan-out (pub/sub)
-       ▲                      └─────────┘            └────────────┘
-       │                           │
-       └──────── subscribe ◀───────┘   every new thought wakes every voice
+person ──▶ POST /thoughts ──┐
+senses ──▶ (periodic) ──────┤
+                            ▼
+                      ┌──────────┐  append   ┌────────────┐
+   voice A ──┐        │          │ ────────▶ │ PostgreSQL │ thoughts   (seq = order of record)
+   voice B ──┼──────▶ │  Stream  │           │            │ listens    (every decision, spoken or not)
+   voice C ──┘        │          │ ────────▶ │ Redis      │ recent window · forming set · pub/sub
+       ▲              └──────────┘           └────────────┘
+       │                   │
+       └──── subscribe ◀───┘   every new thought wakes every listening voice
 ```
 
-- **Stream** (`polyphony/stream.py`): the only shared thing. `append()`
-  writes to PostgreSQL (which assigns `seq`), then pushes to the Redis
-  recent-window list and publishes on a pub/sub channel. `recent()` reads
-  the window; `stray_memories()` samples a few random older thoughts so
-  voices can free-associate.
-- **Voice** (`polyphony/voice.py`): one asyncio task per voice. It listens
-  to the channel, and whenever anything new arrives it runs *attend*; if
-  that says speak, it runs *speak* and appends the result. A voice is
-  defined entirely by `voices/<name>/voice.md`, a free-text description of
-  its values and temperament.
-- **API** (`polyphony/api.py`): `POST /thoughts` to inject a thought,
-  `GET /thoughts` to read the record, `GET /stream` (SSE) to watch live,
-  `GET /attention` to see who considered speaking and why.
-- **LLM** (`polyphony/llm.py`): two tiers through any OpenAI-compatible
-  endpoint. *Attend* is cheap and can be a local model (Ollama exposes the
-  same API); *speak* is the strong one.
+- **Stream**: the only shared thing. `append()` writes to PostgreSQL (which
+  assigns `seq`), pushes to the Redis recent window, and publishes on a
+  channel. `recent()` reads the window; `strays()` samples random older
+  thoughts for free association; `listens()` returns each voice's latest
+  decision; `forming()` returns who is composing right now.
+- **Voice**: one asyncio task per voice, defined entirely by
+  `voices/<name>/voice.md`. See the loop below.
+- **Sense**: one task per entry in a list of plain-text instructions
+  ("AI policy news from the last day", "anything about Waterloo co-op
+  hiring"). On a schedule it asks a model (with search) to fetch and
+  summarize, and appends the result as a `world` thought.
+- **Cadence**: triggered by the person. See below.
+- **API**: inject thoughts, read the record, watch live (SSE), read the
+  listen log, start a cadence.
+- **LLM**: two tiers through any OpenAI-compatible endpoint. *Listen* is
+  cheap and can be a local model (Ollama); *speak* is the strong one.
 
-## Two stages, both model-driven
+## The voice loop
 
-1. **Attend** — the voice reads the recent window plus a few stray
-   memories and returns `{speak, mood, reason, pause_seconds}`. Boredom,
-   fatigue and "we are circling, decide already" are legitimate outputs
-   here; this is where the mind's sense of *enough* lives. `pause_seconds`
-   lets a voice hang back instead of answering instantly, which is what
-   makes the pacing feel organic rather than round-robin.
-2. **Speak** — only if attend said so. The strong model writes the thought
-   in first person, with no name tag and no obligation to be consistent
-   with earlier thoughts. Before speaking, the voice re-reads the stream so
-   the thought responds to what is actually there after the pause.
+```text
+idle ──(stream moved)──▶ listen ──(no)──▶ idle
+                            │
+                           (yes)
+                            ▼
+                     mark forming ──▶ wait pause ──▶ re-read stream ──▶ speak ──▶ append ──▶ idle
+```
+
+1. **Listen** (cheap model). Input: recent window + strays + everyone's
+   latest listen + who is forming. Output:
+   `{speak, mood, reason, pause_seconds}`. Boredom, fatigue, "we are
+   circling", "this has drifted too far", "three others are already on it"
+   are all legitimate. `pause_seconds` lets a voice hang back instead of
+   answering instantly.
+2. **Speak** (strong model), only if listen said so. The voice is marked
+   *forming* so the others can see it. After the pause it re-reads the
+   stream, so the thought responds to what is actually there, then writes
+   in first person with no name tag and no obligation to be consistent
+   with earlier thoughts.
+
+While a voice is forming it does not take new triggers; when its thought is
+appended it goes back to idle and the next stream movement wakes it again.
+This is the only throttle in the system, and it is a cost measure, not a
+behaviour rule.
 
 ## Concurrency and ordering
 
-Voices run truly concurrently and may speak over each other. That is
-allowed — people interrupt each other in their own heads too. What the
-system guarantees is a single, unambiguous **order of record**:
+Voices run truly concurrently and may speak over each other; that is
+allowed. What the system guarantees is a single, unambiguous **order of
+record**:
 
-- `seq` is a PostgreSQL `BIGSERIAL`; the database, not the application,
-  decides the order.
-- The Redis window is a cache; two voices can commit `seq` 5 and 6 and push
-  6 before 5, so readers sort by `seq`. If the window is empty (cold
-  start), it is refilled from PostgreSQL.
-- Each voice coalesces wake-ups: if three thoughts land while it is busy,
-  it reacts once to the newest state instead of three times. This keeps
-  cost bounded under bursts without any rate-limiting rule.
-- Nothing else is shared between voices, so moving voices into separate
-  processes or containers later changes no code: they already coordinate
-  only through PostgreSQL and Redis.
+- `seq` is a PostgreSQL `BIGSERIAL`; the database decides the order.
+- The Redis window is a cache. Two voices can commit 5 and 6 and push 6
+  before 5, so readers sort by `seq`. A cold window is refilled from
+  PostgreSQL.
+- Wake-ups are coalesced: if several thoughts land while a voice is busy,
+  it reacts once to the newest state.
+- Nothing else is shared, so voices can later move to separate processes or
+  containers without code changes; they already coordinate only through
+  PostgreSQL and Redis.
 
-## Deliberately not built (yet)
+## Cadence (decision)
 
-- Topics or sessions: thoughts about several things can coexist; voices
-  decide what to engage with.
-- Loop limits: the stop condition is a model judgement, not a counter.
+An explicit, experimental procedure, started by the person pressing a
+button and typing a resolution. It runs in two rounds so that the vote is
+weighted by relevance rather than one-voice-one-vote:
+
+1. **Standing.** Each voice reads the discussion and the resolution and
+   proposes a weight for *every* voice (including itself) on this
+   question: who has expertise here, who has the most at stake. Weights are
+   averaged across proposals.
+2. **Vote.** Each voice votes for / against / abstain with a one-line
+   reason. The weighted result, the reasons, and the weights are appended
+   to the stream as a `cadence` thought, visible to everyone afterwards
+   like any other thought.
+
+It is deliberately a separate, optional mechanism, not the normal way the
+mind decides. Most of the time the mind should settle on its own.
+
+## Deliberately not built
+
+- Topics or sessions.
+- Loop limits, cooldowns, speak quotas.
 - Conductor, scheduler, turn order.
-- Voice memory beyond the stream itself.
+- Per-voice memory beyond the stream.
 
-## Ideas for later
+## Open questions
 
-- Decision procedures as *voices*, not code: e.g. a "chair" voice that
-  calls a vote, proposes weights (who is the expert, who is affected), and
-  reads the result.
-- A local small model for attend to make always-on attention nearly free.
-- A web view of the stream with the attention log alongside it, so you can
-  watch voices consider speaking and decline.
-- Voices in separate containers (`docker compose --scale`).
+- Sense scheduling and dedup: how often, and how to avoid dropping the
+  same headline in twice.
+- How many strays to sample, and whether to bias toward older or toward
+  thoughts the current voice wrote.
+- Whether a cadence should be callable by a voice, not only the person.
