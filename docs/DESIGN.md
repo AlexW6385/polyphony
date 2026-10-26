@@ -9,7 +9,7 @@ react to them; values argue, associate, wander, get tired, and eventually
 settle on something — or let it go. Each voice is an independent AI agent
 with its own values and temperament. Nobody coordinates them.
 
-The person and the outside world are not special participants. They are two
+The person — the *conscious* — and the outside world are not special participants. They are two
 more sources of thoughts entering the same stream. Several topics can be
 thrown in at once, one can be added halfway through, and any of them can
 drift into something else or connect to something from long ago.
@@ -19,12 +19,13 @@ drift into something else or connect to something from long ago.
 | word | meaning |
 |---|---|
 | **voice** | one agent: a set of values and a temperament, defined by one text file |
-| **thought** | one entry in the stream, from a voice, the person, or the world |
+| **thought** | one entry in the stream, from a voice, the conscious, or the world |
+| **conscious** | the person. Thoughts they type in are tagged `conscious`: the deliberate, aware part of the mind, as opposed to the voices below the surface |
 | **stream** | the single shared, ordered record of thoughts |
 | **listen** | a voice reading the stream and deciding whether to speak; its result (mood, reason, speak or not) is itself recorded and visible to everyone |
 | **forming** | the state of a voice that has decided to speak and is composing; visible to the others |
 | **sense** | a standing instruction for what to bring in from the outside world (news, feeds); a sense periodically fetches and drops thoughts into the stream |
-| **cadence** | a decision procedure: the person poses a resolution, the voices vote, the mind resolves |
+| **cadence** | a decision procedure: a resolution is posed, the voices vote, the mind resolves |
 
 ## Two principles
 
@@ -66,7 +67,7 @@ past self. Continuity comes from the voice file, not from memory.
 ## Components
 
 ```text
-person ──▶ POST /thoughts ──┐
+conscious ─▶ POST /thoughts ─┐
 senses ──▶ (periodic) ──────┤
                             ▼
                       ┌──────────┐  append   ┌────────────┐
@@ -89,7 +90,7 @@ senses ──▶ (periodic) ──────┤
   ("AI policy news from the last day", "anything about Waterloo co-op
   hiring"). On a schedule it asks a model (with search) to fetch and
   summarize, and appends the result as a `world` thought.
-- **Cadence**: triggered by the person. See below.
+- **Cadence**: started by the conscious, or proposed by a voice. See below.
 - **API**: inject thoughts, read the record, watch live (SSE), read the
   listen log, start a cadence.
 - **LLM**: two tiers through any OpenAI-compatible endpoint. *Listen* is
@@ -140,9 +141,19 @@ record**:
 
 ## Cadence (decision)
 
-An explicit, experimental procedure, started by the person pressing a
-button and typing a resolution. It runs in two rounds so that the vote is
-weighted by relevance rather than one-voice-one-vote:
+An explicit, experimental procedure for settling a question. It can be
+started two ways:
+
+- **By the conscious.** The person presses a button and types a resolution.
+  The cadence begins immediately; no permission needed.
+- **By a voice.** A voice may, as part of speaking, propose a cadence with a
+  resolution. That proposal is first put to a quick yes/no vote among all
+  voices (one voice, one vote, simple majority: *is this worth deciding
+  now?*). If it passes, the cadence begins; if not, the proposal stays in
+  the stream as an ordinary thought and the discussion goes on.
+
+Once begun, a cadence runs in two rounds so that the vote is weighted by
+relevance rather than one-voice-one-vote:
 
 1. **Standing.** Each voice reads the discussion and the resolution and
    proposes a weight for *every* voice (including itself) on this
@@ -169,4 +180,3 @@ mind decides. Most of the time the mind should settle on its own.
   same headline in twice.
 - How many strays to sample, and whether to bias toward older or toward
   thoughts the current voice wrote.
-- Whether a cadence should be callable by a voice, not only the person.
