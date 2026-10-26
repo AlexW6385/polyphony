@@ -111,7 +111,7 @@ idle ──(stream moved)──▶ listen ──(no)──▶ idle
 
 1. **Listen** (cheap model). Input: recent window + strays + everyone's
    latest listen + who is forming. Output:
-   `{speak, mood, reason, pause_seconds}`. Boredom, fatigue, "we are
+   `{speak, mood, reason, pause_seconds, propose_cadence}`. Boredom, fatigue, "we are
    circling", "this has drifted too far", "three others are already on it"
    are all legitimate. `pause_seconds` lets a voice hang back instead of
    answering instantly.
@@ -149,8 +149,8 @@ started two ways:
 
 - **By the conscious.** The person presses a button and types a resolution.
   The cadence begins immediately; no permission needed.
-- **By a voice.** A voice may, as part of speaking, propose a cadence with a
-  resolution. That proposal is first put to a quick yes/no vote among all
+- **By a voice.** A voice may, as part of a listen, propose a cadence with a
+  resolution (the `propose_cadence` field). That proposal is first put to a quick yes/no vote among all
   voices (one voice, one vote, simple majority: *is this worth deciding
   now?*). If it passes, the cadence begins; if not, the proposal stays in
   the stream as an ordinary thought and the discussion goes on.
