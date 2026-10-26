@@ -1,0 +1,48 @@
+services:
+  mind:
+    build: .
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+asyncpg://polyphony:polyphony@postgres:5432/polyphony
+      REDIS_URL: redis://redis:6379/0
+      # the image installs the package; point data paths at the copied files
+      VOICES_DIR: /app/voices
+      SENSES_FILE: /app/senses.yaml
+      STATIC_DIR: /app/static
+    ports:
+      - "${PORT:-8000}:8000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # reach a local Ollama
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: polyphony
+      POSTGRES_PASSWORD: polyphony
+      POSTGRES_DB: polyphony
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U polyphony"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  redis:
+    image: redis:7
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+volumes:
+  pgdata:

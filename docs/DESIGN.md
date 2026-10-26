@@ -183,8 +183,9 @@ record**:
 
 - `seq` is a PostgreSQL `BIGSERIAL`; the database decides the order.
 - The Redis window is a cache. Two voices can commit 5 and 6 and push 6
-  before 5, so readers sort by `seq`. A cold window is refilled from
-  PostgreSQL.
+  before 5, so the window is a sorted set scored by `seq` (trimming by
+  arrival order could drop a newer thought and keep an older one). A cold
+  window is refilled from PostgreSQL.
 - Wake-ups are coalesced: if several thoughts land while a voice is busy,
   it reacts once to the newest state.
 - Nothing else is shared, so voices can later move to separate processes or
@@ -314,10 +315,11 @@ sense_log  id BIGSERIAL PK, sense VARCHAR(64), fingerprint VARCHAR(128) UNIQUE,
 
 ```text
 polyphony:thoughts            pub/sub channel; payload = thought JSON
-polyphony:recent              list of thought JSON, LTRIM to RECENT_WINDOW
+polyphony:recent              sorted set of thought JSON scored by seq, trimmed to RECENT_WINDOW
 polyphony:forming             set of voice names currently composing
 polyphony:listen:<voice>      string, latest listen JSON for that voice
 polyphony:control             pub/sub; {"voices": "changed"} / {"senses": "changed"}
+polyphony:cadence:running:<id> set while a cadence runs (TTL 15 min, so a crash can't freeze the mind)
 ```
 
 **Supervisor.** `main.py` does not start a fixed set of tasks. A
@@ -329,7 +331,7 @@ the API publishes on the control channel. This is what makes "add a voice
 from the UI" work without a restart, and it also works across processes.
 
 `append()` order: commit to PostgreSQL first (get `seq`), then in one
-pipeline RPUSH + LTRIM + PUBLISH. Readers of `recent` always sort by `seq`.
+pipeline ZADD + ZREMRANGEBYRANK + PUBLISH. Readers of `recent` always sort by `seq`.
 If `recent` is empty, refill from PostgreSQL (last RECENT_WINDOW rows).
 
 ## API
@@ -340,7 +342,6 @@ POST /thoughts            {content, author="conscious", kind="conscious"|"world"
 GET  /thoughts?after=0&limit=200
 GET  /stream              SSE, one event per thought (any kind)
 GET  /listens?limit=100   latest listen rows
-GET  /voices              [{name, forming: bool, last_listen}]
 POST /cadence             {resolution} -> starts immediately (conscious)
 GET  /cadence/{id}
 GET  /voices              [{name, text, overrides, enabled, forming, last_listen}]
@@ -350,6 +351,10 @@ DELETE /voices/{name}                                         -> publishes contr
 GET  /senses              [{name, instruction, every_minutes, enabled, last_run}]
 POST /senses  PUT /senses/{name}  DELETE /senses/{name}       -> publishes control
 GET  /                    static/index.html
+```
+
+`GET /stream?after=<seq>` replays from the record first, then goes live, so
+a reconnecting client misses nothing (it also honours `Last-Event-ID`).
 
 ## UI (v0, one page)
 
@@ -368,7 +373,6 @@ few seconds), and a sidebar with four actions:
 
 Nothing else. The page exists so the mind can be watched and fed; it is
 not the product.
-```
 
 ## Config (.env)
 
@@ -376,6 +380,7 @@ not the product.
 DATABASE_URL, REDIS_URL
 LISTEN_PROVIDER=openai  LISTEN_MODEL=gpt-4o-mini   LISTEN_BASE_URL=  LISTEN_API_KEY=
 SPEAK_PROVIDER=anthropic SPEAK_MODEL=claude-sonnet-4-5 SPEAK_BASE_URL=  SPEAK_API_KEY=
+SENSE_PROVIDER=  SENSE_MODEL=   # needs web search; empty = use the speak tier
 # provider: openai | anthropic | gemini | deepseek | ollama  (see LLM providers)
 RECENT_WINDOW=40   STRAYS=4   ENABLED_VOICES=   PORT=8000
 ```
@@ -502,10 +507,13 @@ labelled.
   every_minutes: 240
 ```
 
-Each sense is a task: sleep, then call the speak tier with web search (or
-a search tool the implementer picks) and the instruction, asking for 0–3
-items as `{title, url, summary}`. For each item compute a fingerprint
-(sha256 of lowercased title or url); skip if in `sense_log`; otherwise
+Each sense is a task: sleep, then call the sense tier (default: the speak
+tier) with the vendor's built-in web search (OpenAI Responses `web_search`,
+Anthropic `web_search` server tool, Gemini Google Search grounding; DeepSeek
+and Ollama have none, so a sense on those fails and logs) and the instruction, asking for 0–3
+items as `{title, url, summary}`. For each item compute fingerprints
+(sha256 of the normalized url, and of the lowercased title — one row each,
+so the same headline is caught under a new URL too); skip if any is in `sense_log`; otherwise
 append a `world` thought (`author=<sense name>`, content = title + summary,
 meta.url) and insert into `sense_log`. A sense that returns nothing appends
 nothing. No sense runs more often than every 30 minutes.
