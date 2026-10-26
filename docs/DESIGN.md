@@ -93,8 +93,11 @@ senses ──▶ (periodic) ──────┤
 - **Cadence**: started by the conscious, or proposed by a voice. See below.
 - **API**: inject thoughts, read the record, watch live (SSE), read the
   listen log, start a cadence.
-- **LLM**: two tiers through any OpenAI-compatible endpoint. *Listen* is
-  cheap and can be a local model (Ollama); *speak* is the strong one.
+- **LLM**: two tiers, *listen* (cheap, always on) and *speak* (strong,
+  only when a voice speaks), each pointed at any provider: OpenAI,
+  Anthropic, DeepSeek, Gemini, a local model via Ollama. A voice may
+  override either tier, so different voices can literally be different
+  models.
 
 ## The voice loop
 
@@ -198,8 +201,8 @@ Where this section and the prose above disagree, this section wins for v0.
 - PostgreSQL 16 via SQLAlchemy 2.x async + asyncpg. Schema via
   `Base.metadata.create_all` on startup in v0; Alembic can come later.
 - Redis 7 via `redis.asyncio`: recent window (list), forming set, pub/sub.
-- `openai` client for both model tiers, each with its own
-  `base_url`/`api_key`/`model` so the listen tier can point at Ollama.
+- Provider-agnostic LLM layer (see *LLM providers* below). Each tier
+  picks a provider, model, base URL and key independently.
 - `pydantic-settings` for config from `.env`. Docker Compose for
   mind + postgres + redis. No frontend framework in v0: one static HTML
   page served by FastAPI is enough.
@@ -282,9 +285,9 @@ GET  /                    static/index.html
 
 ```text
 DATABASE_URL, REDIS_URL
-OPENAI_API_KEY, OPENAI_BASE_URL            defaults for both tiers
-LISTEN_MODEL, LISTEN_BASE_URL, LISTEN_API_KEY
-SPEAK_MODEL,  SPEAK_BASE_URL,  SPEAK_API_KEY
+LISTEN_PROVIDER=openai  LISTEN_MODEL=gpt-4o-mini   LISTEN_BASE_URL=  LISTEN_API_KEY=
+SPEAK_PROVIDER=anthropic SPEAK_MODEL=claude-sonnet-4-5 SPEAK_BASE_URL=  SPEAK_API_KEY=
+# provider: openai | anthropic | gemini | deepseek | ollama  (see LLM providers)
 RECENT_WINDOW=40   STRAYS=4   ENABLED_VOICES=   PORT=8000
 ```
 
@@ -295,9 +298,9 @@ async def run(self):
     listener = create_task(self._listen_channel())   # sets self._wake on any thought not by me
     while True:
         await self._wake.wait(); self._wake.clear()
-        await self.attend()
+        await self.listen()
 
-async def attend(self):
+async def listen(self):
     recent  = await stream.recent()
     if not recent: return
     strays  = await stream.strays(before_seq=recent[0]["seq"], n=STRAYS)
@@ -319,12 +322,55 @@ async def attend(self):
 ```
 
 Wake-ups coalesce because `_wake` is an `asyncio.Event`: N thoughts during
-one attend produce one further attend, against the newest state.
+one listen produce one further listen, against the newest state.
 
 Listen output schema, exactly:
 `{"speak": bool, "mood": str, "reason": str, "pause_seconds": number,
 "propose_cadence": str | null}`. `propose_cadence`, when non-null, is a
 resolution text and starts the proposal vote (see cadence).
+
+## LLM providers
+
+`llm.py` exposes one interface and hides the vendor:
+
+```python
+class Provider(Protocol):
+    async def complete(self, *, model: str, system: str, user: str,
+                       json: bool = False, temperature: float = 0.8,
+                       max_tokens: int = 1024) -> str: ...
+```
+
+Ship these implementations, selected by the `*_PROVIDER` setting:
+
+| provider | SDK | notes |
+|---|---|---|
+| `openai` | `openai` | also used, with a `base_url`, for anything OpenAI-compatible |
+| `deepseek` | `openai` | preset `base_url=https://api.deepseek.com`, key from `DEEPSEEK_API_KEY` |
+| `ollama` | `openai` | preset `base_url=http://localhost:11434/v1`, no key; for local listen models |
+| `anthropic` | `anthropic` | system prompt goes in the `system` field, not a message |
+| `gemini` | `google-genai` | system prompt via `system_instruction` |
+
+JSON mode differs per vendor (OpenAI has `response_format`, Anthropic and
+Gemini do not have an equivalent that is worth relying on), so `json=True`
+means: ask for a JSON object in the prompt, set the vendor option where it
+exists, and *always* extract the first `{...}` from the reply and
+`json.loads` it. A failed parse raises; the voice loop logs and treats it
+as "quiet". Retry once on transient HTTP errors, then give up for that
+listen; never crash the voice task.
+
+Per-voice override: `voice.md` may begin with YAML front matter:
+
+```yaml
+---
+listen: { provider: ollama, model: qwen2.5:3b }
+speak:  { provider: deepseek, model: deepseek-chat }
+---
+You care about rest ...
+```
+
+Missing keys fall back to the tier's global setting. The point is that the
+mind can be a mixture of models, and that swapping a voice's model is a
+one-line change with no code.
 
 ## Prompts — required content
 
@@ -400,8 +446,8 @@ running; the cadence thought wakes them afterwards like any other thought.
 
 ## Starter voices
 
-Seven value-voices, each a short paragraph (3–6 sentences): what it cares
-about and how it tends to think. Ship: `freedom`, `rest`, `fairness`,
+Seven value-voices, each a short paragraph (3–6 sentences) after optional
+front matter: what it cares about and how it tends to think. Ship: `freedom`, `rest`, `fairness`,
 `curiosity`, `maker`, `beauty`, `skeptic`. No job titles, no roles.
 
 ## v0 is done when
