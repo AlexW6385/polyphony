@@ -59,6 +59,35 @@ those, not to entertain themselves. The prompt says so, and says that a
 long drift far from any origin is a reason to stop; nothing in the code
 enforces it.
 
+## What a voice is
+
+A voice is not a job title and not a bare abstraction. It is a *want*,
+rooted in something concrete, that argues for a value when it talks. "The
+one who wants to be on the bike tomorrow instead of at the desk" is a
+voice; so is "the one who keeps checking the group chat". When an abstract
+question lands (a headline about hiring freezes, "should I take the
+specialization"), concrete voices drag it to the ground — *what does this
+do to my weekends?* — and that is what makes the discussion feel like a
+head rather than a seminar. Purely abstract voices (fairness, doubt) are
+allowed too; a good mind has a few of each.
+
+Voices are meant to be **personal**. The ones shipped in the repo are
+examples; the person is expected to rewrite them to match their own head.
+That is why a voice is nothing but a text file / a text field, with no
+logic attached.
+
+`voice.md` template (all prose; the headings are a suggestion, not a schema):
+
+```markdown
+---
+# optional model overrides
+---
+**Wants**   — what this voice is after, concretely. One or two sentences.
+**Believes** — the value underneath, in its own words.
+**Sounds like** — how it talks: fast/slow, warm/dry, first to speak or last.
+**Shows up when** — what kind of thought pulls it in; what bores it.
+```
+
 Voices are **stateless by design**. Each time a voice listens it looks
 fresh: it has its values and temperament, and it sees what was said
 (including what "it" said earlier), but it is not obliged to agree with its
@@ -221,9 +250,9 @@ polyphony/
   cadence.py     run_cadence(), propose_cadence()
   api.py         create_app(stream)
   main.py        wires everything, starts tasks
-voices/<name>/voice.md      one file per voice; the file is the voice
-senses.yaml                 list of {name, instruction, every_minutes}
-static/index.html           stream + listen log side by side (SSE)
+voices/<name>/voice.md      seed voices, loaded into the DB on first start
+senses.yaml                 seed senses, same
+static/index.html           the one page (see UI)
 scripts/say.py, scripts/tail.py
 docs/DESIGN.md, README.md, .env.example, docker-compose.yml, Dockerfile
 ```
@@ -247,6 +276,13 @@ cadences   id BIGSERIAL PK, resolution TEXT, proposed_by VARCHAR(64),
            weights JSONB, votes JSONB, result JSONB,
            created_at, resolved_at
 
+voices     name VARCHAR(64) PK, text TEXT, overrides JSONB NULL,
+           enabled BOOL DEFAULT true, created_at, updated_at
+           -- the record of truth; voices/ on disk only seeds this
+
+senses     name VARCHAR(64) PK, instruction TEXT, every_minutes INT,
+           enabled BOOL DEFAULT true, last_run TIMESTAMPTZ NULL
+
 sense_log  id BIGSERIAL PK, sense VARCHAR(64), fingerprint VARCHAR(128) UNIQUE,
            seq BIGINT NULL, fetched_at TIMESTAMPTZ
            -- fingerprint = sha256 of normalized title/url; dedup across runs
@@ -261,7 +297,16 @@ polyphony:thoughts            pub/sub channel; payload = thought JSON
 polyphony:recent              list of thought JSON, LTRIM to RECENT_WINDOW
 polyphony:forming             set of voice names currently composing
 polyphony:listen:<voice>      string, latest listen JSON for that voice
+polyphony:control             pub/sub; {"voices": "changed"} / {"senses": "changed"}
 ```
+
+**Supervisor.** `main.py` does not start a fixed set of tasks. A
+supervisor reads the `voices` and `senses` tables, starts one task per
+enabled row, and listens on `polyphony:control`; on a change message it
+diffs the tables against running tasks and starts, stops, or restarts
+(text changed) the affected ones. Every write to those tables through
+the API publishes on the control channel. This is what makes "add a voice
+from the UI" work without a restart, and it also works across processes.
 
 `append()` order: commit to PostgreSQL first (get `seq`), then in one
 pipeline RPUSH + LTRIM + PUBLISH. Readers of `recent` always sort by `seq`.
@@ -278,7 +323,31 @@ GET  /listens?limit=100   latest listen rows
 GET  /voices              [{name, forming: bool, last_listen}]
 POST /cadence             {resolution} -> starts immediately (conscious)
 GET  /cadence/{id}
+GET  /voices              [{name, text, overrides, enabled, forming, last_listen}]
+POST /voices              {name, text, overrides?}           -> publishes control
+PUT  /voices/{name}       {text?, overrides?, enabled?}      -> publishes control
+DELETE /voices/{name}                                         -> publishes control
+GET  /senses              [{name, instruction, every_minutes, enabled, last_run}]
+POST /senses  PUT /senses/{name}  DELETE /senses/{name}       -> publishes control
 GET  /                    static/index.html
+
+## UI (v0, one page)
+
+Plain HTML + a little JS, served by FastAPI; no build step. Layout: the
+stream down the middle (live via SSE), the listen log beside it (one line
+per voice: mood, reason, spoke or quiet, who is forming — refreshed every
+few seconds), and a sidebar with four actions:
+
+1. **Think** — a textbox; submit = `POST /thoughts` as `conscious`.
+2. **Decide** — a textbox for a resolution; submit = `POST /cadence`.
+   Cadence results render inline in the stream with weights and votes.
+3. **Voices** — list with enable/disable; add (name + text, optional model
+   overrides); edit in place; delete. Changes take effect live.
+4. **Senses** — list; add (name + instruction + every N minutes); enable /
+   disable; delete.
+
+Nothing else. The page exists so the mind can be watched and fed; it is
+not the product.
 ```
 
 ## Config (.env)
@@ -446,9 +515,23 @@ running; the cadence thought wakes them afterwards like any other thought.
 
 ## Starter voices
 
-Seven value-voices, each a short paragraph (3–6 sentences) after optional
-front matter: what it cares about and how it tends to think. Ship: `freedom`, `rest`, `fairness`,
-`curiosity`, `maker`, `beauty`, `skeptic`. No job titles, no roles.
+Seven voices following the template above, mixing concrete wants with a
+couple of pure stances. Ship, as examples the person will rewrite:
+
+- `ride` — wants to be outside on the bike; believes in freedom and bodies;
+  bored by administration.
+- `rest` — wants to stop; believes the mind burns out; the one who says
+  "enough, pick one".
+- `make` — wants to ship the thing; believes a rough version today beats a
+  perfect one later.
+- `learn` — wants to understand; everything reminds it of something; derails
+  decisions by making them interesting.
+- `people` — wants company, messages, being liked; believes nothing matters
+  alone; drags abstract questions to "who will I be with".
+- `fair` — pure stance: who pays for this choice, who isn't in the room.
+- `doubt` — pure stance: what is the evidence; admits when doubt is just fear.
+
+No job titles, no roles. Each file is 4–8 sentences.
 
 ## v0 is done when
 
@@ -463,7 +546,9 @@ front matter: what it cares about and how it tends to think. Ship: `freedom`, `r
 5. `POST /cadence` runs both rounds and appends a `cadence` thought.
 6. One sense configured in `senses.yaml` appends a `world` thought and does
    not append the same item twice.
-7. `/` shows the stream and the listen log side by side, live.
+7. `/` shows the stream and the listen log side by side, live, and from it
+   a voice can be added and starts listening without a restart, a sense
+   can be added, a conscious thought dropped in, and a cadence started.
 
 ## Not in v0
 
