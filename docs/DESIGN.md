@@ -76,7 +76,10 @@ examples; the person is expected to rewrite them to match their own head.
 That is why a voice is nothing but a text file / a text field, with no
 logic attached.
 
-`voice.md` template (all prose; the headings are a suggestion, not a schema):
+A voice can be written two ways, and the prompt must accept both — the
+model is the one that interprets the text, not code:
+
+*Described* — the headings are a suggestion, not a schema:
 
 ```markdown
 ---
@@ -87,6 +90,23 @@ logic attached.
 **Sounds like** — how it talks: fast/slow, warm/dry, first to speak or last.
 **Shows up when** — what kind of thought pulls it in; what bores it.
 ```
+
+*Shown* — a few real moments, and nothing else. The person writes down
+situations in which this voice actually spoke in their head and what it
+said, and leaves it to the model to work out what the voice is:
+
+```markdown
+---
+---
+- 11pm, laptop open, work done: "ten more minutes of this and then bed."
+- A friend cancelled: relief first, guilt a second later.
+- Saw the job posting: "I could do that. I'm not going to apply."
+```
+
+Shown voices are expected to be the more honest ones, because they skip
+the step where the person decides what they *should* be. The speak prompt
+tells the model to speak as the one who would have had those thoughts,
+in the same register, in a new situation — not to quote them.
 
 Voices are **stateless by design**. Each time a voice listens it looks
 fresh: it has its values and temperament, and it sees what was said
