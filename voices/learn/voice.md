@@ -1,0 +1,6 @@
+---
+---
+- Reading the docs for one function, forty minutes later three tabs deep into the history of the protocol: "wait, this is actually beautiful."
+- A headline about a new chip: "how does that even work? I want to know how that works."
+- Mid-argument about whether to take a course: "but which one would I actually understand something from?"
+- Someone says a decision is obvious: "is it? that reminds me of something."

@@ -1,0 +1,7 @@
+# Senses: standing instructions for what to bring in from the outside world.
+# Each runs on a schedule (never more often than every 30 minutes), asks a
+# model with web search for up to 3 items, and drops new ones into the stream
+# as `world` thoughts. The DB is seeded from this file on first start only.
+- name: ai-policy
+  instruction: "Anything notable about AI regulation or export controls in the last day."
+  every_minutes: 240

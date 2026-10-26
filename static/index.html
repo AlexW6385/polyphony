@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Polyphony</title>
+<style>
+  :root {
+    --bg: #f6f4ef; --panel: #fffdf8; --ink: #22201c; --muted: #7a756b; --line: #e3ddd0;
+    --accent: #3b5bdb; --conscious: #b8860b; --world: #2b8a3e; --cadence: #862e9c;
+    --quiet: #adb5bd; --speak: #3b5bdb;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #16161a; --panel: #1e1e23; --ink: #e9e6df; --muted: #8e8a82; --line: #2e2e35;
+            --accent: #748ffc; --conscious: #f2c94c; --world: #69db7c; --cadence: #da77f2;
+            --quiet: #5c636a; --speak: #748ffc; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 var(--sans); }
+  header { padding: 14px 20px; border-bottom: 1px solid var(--line); display: flex;
+           align-items: baseline; gap: 12px; }
+  header h1 { margin: 0; font-size: 18px; letter-spacing: .02em; }
+  header .tag { color: var(--muted); font-style: italic; }
+  header .status { margin-left: auto; color: var(--muted); font-size: 12px; }
+  main { display: grid; grid-template-columns: 300px minmax(0, 1fr) 320px; gap: 0;
+         height: calc(100vh - 53px); }
+  section { overflow-y: auto; padding: 16px; }
+  section + section { border-left: 1px solid var(--line); }
+  h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: var(--muted);
+       margin: 0 0 8px; }
+  .block { margin-bottom: 22px; }
+  textarea, input, select { width: 100%; font: inherit; color: inherit; background: var(--panel);
+       border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; }
+  textarea { resize: vertical; min-height: 64px; }
+  .mono { font-family: var(--mono); font-size: 12px; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--panel); color: inherit;
+           border-radius: 6px; padding: 5px 10px; cursor: pointer; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: white; }
+  button:hover { filter: brightness(1.05); }
+  .row { display: flex; gap: 6px; align-items: center; margin-top: 6px; }
+  .row > input { flex: 1; }
+  .item { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px;
+          background: var(--panel); }
+  .item .name { font-weight: 600; }
+  .item.off { opacity: .5; }
+  .item .actions { display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap; }
+  .item .actions button { font-size: 12px; padding: 2px 8px; }
+  .small { font-size: 12px; color: var(--muted); }
+  details summary { cursor: pointer; color: var(--muted); font-size: 12px; margin: 4px 0; }
+
+  #stream { max-width: 760px; margin: 0 auto; }
+  .thought { padding: 10px 0 12px; border-bottom: 1px dashed var(--line); }
+  .thought .meta { font-size: 12px; color: var(--muted); display: flex; gap: 8px; }
+  .thought .who { font-weight: 600; color: var(--ink); }
+  .thought .body { white-space: pre-wrap; margin-top: 2px; }
+  .thought.conscious .who { color: var(--conscious); }
+  .thought.conscious .body { font-weight: 500; }
+  .thought.world .who { color: var(--world); }
+  .thought.world a { color: var(--world); }
+  .thought.cadence { border: 1px solid var(--cadence); border-radius: 8px; padding: 10px 12px;
+                     margin: 10px 0; }
+  .thought.cadence .who { color: var(--cadence); }
+  .cadence-table { width: 100%; border-collapse: collapse; margin-top: 6px; font-size: 13px; }
+  .cadence-table td { padding: 2px 6px; border-top: 1px solid var(--line); vertical-align: top; }
+  .bar { height: 6px; background: var(--cadence); border-radius: 3px; }
+  .verdict { font-weight: 600; }
+  .empty { color: var(--muted); text-align: center; margin-top: 30vh; }
+
+  .listen { display: grid; grid-template-columns: 10px 1fr; gap: 8px; padding: 6px 0;
+            border-bottom: 1px dashed var(--line); }
+  .dot { width: 10px; height: 10px; border-radius: 50%; margin-top: 5px; background: var(--quiet); }
+  .dot.speak { background: var(--speak); }
+  .dot.forming { background: var(--speak); animation: pulse 1s infinite; }
+  @keyframes pulse { 50% { opacity: .3; } }
+  .listen .reason { color: var(--muted); }
+  @media (max-width: 1000px) {
+    main { grid-template-columns: 1fr; height: auto; }
+    section + section { border-left: none; border-top: 1px solid var(--line); }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Polyphony</h1><span class="tag">many voices, no conductor</span>
+  <span class="status" id="status">connecting…</span>
+</header>
+<main>
+  <section id="side">
+    <div class="block">
+      <h2>Think</h2>
+      <form id="think-form">
+        <textarea id="think" placeholder="Drop a conscious thought into the mind…"></textarea>
+        <div class="row"><button class="primary">Think</button>
+          <span class="small">⌘/Ctrl+Enter</span></div>
+      </form>
+    </div>
+    <div class="block">
+      <h2>Decide</h2>
+      <form id="decide-form">
+        <input id="resolution" placeholder="A resolution to vote on">
+        <div class="row"><button class="primary">Start cadence</button></div>
+      </form>
+    </div>
+    <div class="block">
+      <h2>Voices</h2>
+      <div id="voices"></div>
+      <details>
+        <summary>Add a voice</summary>
+        <form id="voice-form">
+          <input id="voice-name" placeholder="name (e.g. sleep)" class="mono">
+          <textarea id="voice-text" rows="7" placeholder="**Wants** — …&#10;**Believes** — …&#10;&#10;or a few real moments:&#10;- 11pm, laptop open: &quot;ten more minutes&quot;"></textarea>
+          <input id="voice-overrides" class="mono" placeholder='optional overrides JSON: {"speak":{"provider":"deepseek","model":"deepseek-chat"}}'>
+          <div class="row"><button class="primary">Add voice</button></div>
+        </form>
+      </details>
+    </div>
+    <div class="block">
+      <h2>Senses</h2>
+      <div id="senses"></div>
+      <details>
+        <summary>Add a sense</summary>
+        <form id="sense-form">
+          <input id="sense-name" placeholder="name (e.g. coop-hiring)" class="mono">
+          <textarea id="sense-instruction" rows="3" placeholder="What to look for in the world"></textarea>
+          <div class="row"><span class="small">every</span>
+            <input id="sense-every" type="number" min="30" value="240" style="width:90px">
+            <span class="small">min</span><button class="primary">Add sense</button></div>
+        </form>
+      </details>
+    </div>
+  </section>
+
+  <section><div id="stream"><p class="empty" id="empty">The mind is quiet. Think something.</p></div></section>
+
+  <section>
+    <h2>Listening</h2>
+    <div id="listens"></div>
+  </section>
+</main>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c =>
+  ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const api = async (method, path, body) => {
+  const r = await fetch(path, { method, headers: {"Content-Type": "application/json"},
+                                body: body ? JSON.stringify(body) : undefined });
+  if (!r.ok) { const t = await r.text(); alert(`${method} ${path}: ${t}`); throw new Error(t); }
+  return r.status === 204 ? null : r.json();
+};
+const time = (iso) => iso ? new Date(iso).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"}) : "";
+
+// ---------------------------------------------------------------- stream
+let lastSeq = 0;
+const seen = new Set();
+
+function cadenceHtml(t) {
+  const m = t.meta || {};
+  if (!m.votes) return `<div class="body">${esc(t.content)}</div>`;
+  const r = m.result || {};
+  const share = r.share_for == null ? "n/a" : Math.round(r.share_for * 100) + "%";
+  const rows = Object.entries(m.votes).map(([v, x]) => {
+    const w = (m.weights || {})[v] || 0;
+    return `<tr><td><b>${esc(v)}</b></td>
+      <td style="width:80px"><div class="bar" style="width:${Math.round(w * 100 * 2.5)}%"></div>
+        <span class="small">${w.toFixed(2)}</span></td>
+      <td>${esc(x.vote)}</td><td class="small">${esc(x.reason)}</td></tr>`;
+  }).join("");
+  return `<div class="body">“${esc(m.resolution)}” <span class="small">called by ${esc(m.proposed_by)}</span></div>
+    <div class="verdict">${r.passed ? "Passed" : "Did not pass"} — weighted share for ${share}</div>
+    <table class="cadence-table">${rows}</table>`;
+}
+
+function addThought(t) {
+  if (seen.has(t.seq)) return;
+  seen.add(t.seq);
+  lastSeq = Math.max(lastSeq, t.seq);
+  $("#empty")?.remove();
+  const div = document.createElement("div");
+  div.className = `thought ${t.kind}`;
+  const url = t.meta && t.meta.url ? ` · <a href="${esc(t.meta.url)}" target="_blank" rel="noopener">source</a>` : "";
+  const kindTag = t.kind === "voice" ? "" : `<span>[${t.kind}]</span>`;
+  div.innerHTML = `<div class="meta"><span>#${t.seq}</span><span class="who">${esc(t.author)}</span>
+      ${kindTag}${t.mood ? `<span>(${esc(t.mood)})</span>` : ""}<span>${time(t.created_at)}</span>${url}</div>` +
+    (t.kind === "cadence" ? cadenceHtml(t) : `<div class="body">${esc(t.content)}</div>`);
+  // keep order of record even if events arrive out of order
+  const stream = $("#stream");
+  const after = [...stream.children].find(c => +c.dataset.seq > t.seq);
+  div.dataset.seq = t.seq;
+  stream.insertBefore(div, after || null);
+  if (!after) div.scrollIntoView({block: "end", behavior: "smooth"});
+}
+
+async function loadHistory() {
+  let batch;
+  do {
+    batch = await api("GET", `/thoughts?after=${lastSeq}&limit=500`);
+    batch.forEach(addThought);
+  } while (batch.length === 500);
+}
+
+function connect() {
+  const es = new EventSource(`/stream?after=${lastSeq}`);
+  es.onopen = () => $("#status").textContent = "live";
+  es.onmessage = (e) => addThought(JSON.parse(e.data));
+  es.onerror = () => { $("#status").textContent = "reconnecting…"; es.close(); setTimeout(connect, 2000); };
+}
+
+// ---------------------------------------------------------------- listens + voices
+let voices = [];
+
+function renderListens() {
+  $("#listens").innerHTML = voices.filter(v => v.enabled).map(v => {
+    const l = v.last_listen;
+    const cls = v.forming ? "forming" : (l && l.speak ? "speak" : "");
+    const state = v.forming ? "forming…" : (l ? (l.speak ? "spoke" : "quiet") : "not yet");
+    return `<div class="listen"><div class="dot ${cls}"></div><div>
+      <b>${esc(v.name)}</b> <span class="small">${state}${l ? " · " + esc(l.mood) + " · at #" + l.trigger_seq : ""}</span>
+      ${l ? `<div class="reason">${esc(l.reason)}</div>` : ""}</div></div>`;
+  }).join("") || `<p class="small">No voices.</p>`;
+}
+
+function renderVoices() {
+  $("#voices").innerHTML = voices.map(v => `
+    <div class="item ${v.enabled ? "" : "off"}" data-name="${esc(v.name)}">
+      <span class="name">${esc(v.name)}</span>
+      ${Object.keys(v.overrides || {}).length ? `<span class="small mono"> ${esc(JSON.stringify(v.overrides))}</span>` : ""}
+      <div class="actions">
+        <button data-act="toggle">${v.enabled ? "Disable" : "Enable"}</button>
+        <button data-act="edit">Edit</button>
+        <button data-act="delete">Delete</button>
+      </div>
+    </div>`).join("");
+}
+
+async function refreshVoices() {
+  try { voices = await api("GET", "/voices"); } catch { return; }
+  renderListens();
+  const editing = document.querySelector("#voices textarea");
+  if (!editing) renderVoices();
+}
+
+$("#voices").addEventListener("click", async (e) => {
+  const btn = e.target.closest("button"); if (!btn) return;
+  const item = btn.closest(".item"); const name = item.dataset.name;
+  const v = voices.find(x => x.name === name);
+  const act = btn.dataset.act;
+  if (act === "toggle") await api("PUT", `/voices/${name}`, {enabled: !v.enabled});
+  if (act === "delete" && confirm(`Delete voice "${name}"?`)) await api("DELETE", `/voices/${name}`);
+  if (act === "edit") {
+    item.innerHTML = `<span class="name">${esc(name)}</span>
+      <textarea rows="9">${esc(v.text)}</textarea>
+      <input class="mono" value='${esc(JSON.stringify(v.overrides || {}))}'>
+      <div class="actions"><button data-act="save" class="primary">Save</button><button data-act="cancel">Cancel</button></div>`;
+    return;
+  }
+  if (act === "save") {
+    let overrides;
+    try { overrides = JSON.parse(item.querySelector("input").value || "{}"); }
+    catch { alert("overrides must be JSON"); return; }
+    await api("PUT", `/voices/${name}`, {text: item.querySelector("textarea").value, overrides});
+  }
+  item.querySelector("textarea")?.remove();
+  await refreshVoices(); renderVoices();
+});
+
+$("#voice-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  let overrides = null;
+  const raw = $("#voice-overrides").value.trim();
+  if (raw) { try { overrides = JSON.parse(raw); } catch { alert("overrides must be JSON"); return; } }
+  await api("POST", "/voices", {name: $("#voice-name").value.trim(), text: $("#voice-text").value, overrides});
+  e.target.reset(); await refreshVoices();
+});
+
+// ---------------------------------------------------------------- senses
+async function refreshSenses() {
+  const senses = await api("GET", "/senses");
+  $("#senses").innerHTML = senses.map(s => `
+    <div class="item ${s.enabled ? "" : "off"}" data-name="${esc(s.name)}">
+      <span class="name">${esc(s.name)}</span> <span class="small">every ${s.every_minutes} min${s.last_run ? " · last " + time(s.last_run) : ""}</span>
+      <div class="small">${esc(s.instruction)}</div>
+      <div class="actions">
+        <button data-act="toggle" data-on="${s.enabled}">${s.enabled ? "Disable" : "Enable"}</button>
+        <button data-act="delete">Delete</button>
+      </div>
+    </div>`).join("") || `<p class="small">No senses.</p>`;
+}
+
+$("#senses").addEventListener("click", async (e) => {
+  const btn = e.target.closest("button"); if (!btn) return;
+  const name = btn.closest(".item").dataset.name;
+  if (btn.dataset.act === "toggle") await api("PUT", `/senses/${name}`, {enabled: btn.dataset.on !== "true"});
+  if (btn.dataset.act === "delete" && confirm(`Delete sense "${name}"?`)) await api("DELETE", `/senses/${name}`);
+  refreshSenses();
+});
+
+$("#sense-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  await api("POST", "/senses", {name: $("#sense-name").value.trim(),
+    instruction: $("#sense-instruction").value, every_minutes: +$("#sense-every").value || 240});
+  e.target.reset(); refreshSenses();
+});
+
+// ---------------------------------------------------------------- think / decide
+$("#think-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const content = $("#think").value.trim(); if (!content) return;
+  await api("POST", "/thoughts", {content}); $("#think").value = "";
+});
+$("#think").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) $("#think-form").requestSubmit();
+});
+$("#decide-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const resolution = $("#resolution").value.trim(); if (!resolution) return;
+  await api("POST", "/cadence", {resolution}); $("#resolution").value = "";
+});
+
+// ---------------------------------------------------------------- boot
+(async () => {
+  await loadHistory();
+  connect();
+  refreshVoices(); refreshSenses();
+  setInterval(refreshVoices, 3000);
+  setInterval(refreshSenses, 30000);
+})();
+</script>
+</body>
+</html>
