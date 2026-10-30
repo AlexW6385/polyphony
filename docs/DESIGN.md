@@ -1,83 +1,172 @@
-# Polyphony — design notes (v0)
+# Polyphony — design (v1)
 
-> A mind is a polyphony: many voices, no conductor.
+> A polyphony of anything: many voices, no conductor.
+
+This document replaces the v0 design notes. Everything v0 decided still holds unless a section
+below says otherwise; the v0 build is the starting point, not something to throw away. The
+first half is the *why*; the second half ("Implementation notes") is the *what*, pinned down
+for whoever builds it. Where the two disagree, the implementation notes win.
+
+---
 
 ## The idea
 
-Polyphony simulates the inside of a head. Thoughts appear; other thoughts
-react to them; values argue, associate, wander, get tired, and eventually
-settle on something — or let it go. Each voice is an independent AI agent
-with its own values and temperament. Nobody coordinates them.
+Polyphony is a room with no chair. Several voices share one stream of thoughts. Each voice is
+an independent AI agent with its own wants and temperament; each one keeps looking at the
+stream and decides for itself whether to add to it. Nobody schedules them, nobody moderates
+them, nobody tells them when to stop. Thoughts appear, others react, values argue, associate,
+wander, get tired, and eventually settle on something — or let it go.
 
-The person — the *conscious* — and the outside world are not special participants. They are two
-more sources of thoughts entering the same stream. Several topics can be
-thrown in at once, one can be added halfway through, and any of them can
-drift into something else or connect to something from long ago.
+v0 framed this as the inside of one head, and that remains the first and default use. But
+nothing in the engine is specific to a mind. The same machinery is a polyphony of:
+
+- **one mind** — the inner voices of a person (wants, fears, habits, stances);
+- **several people** — a family deciding where to live, a team arguing about a launch, a
+  council of characters;
+- **groups of people** — residents of a city reacting to a policy, generations, professions,
+  the stakeholders of a decision.
+
+What a voice *is* lives entirely in its prompt. What the whole polyphony *is* lives in one
+more piece of text, the **frame**. The engine does not change between them.
+
+## What it is for
+
+The point of a polyphony is its outcome, not the talk. A question goes in, from the person or
+from the world, and one of two things comes out:
+
+- **a decision**, when the voices settle it themselves or a cadence settles it formally;
+- **a map of positions**, when they do not: who wanted what, who moved whom, where they still
+  disagree and why.
+
+Either way the full record stays: every thought, every listen, every weight and every vote.
+That record is the evidence; the outcome is the product. A long stream is unreadable for a
+human, so v1 adds a **digest**: when the room goes quiet, a summariser that is not a voice
+writes what was asked, what each voice argued, what changed, and what was decided or left
+open. The evals ask the same question of every run: *did the room produce a useful outcome for
+what it was given?*
+
+The human and the outside world are not special participants. They are two more sources of
+thoughts entering the same stream. Several topics can be thrown in at once, one can be added
+halfway through, and any of them can drift into something else or reconnect to something from
+long ago.
 
 ## Vocabulary
 
 | word | meaning |
 |---|---|
-| **voice** | one agent: a set of values and a temperament, defined by one text file |
-| **thought** | one entry in the stream, from a voice, the conscious, or the world |
-| **conscious** | the person. Thoughts they type in are tagged `conscious`: the deliberate, aware part of the mind, as opposed to the voices below the surface |
+| **ensemble** | one complete polyphony: a frame, its voices and its senses. One ensemble runs per instance |
+| **frame** | text saying what this polyphony is, who the voices are to each other, and who the human is. Injected into every prompt |
+| **voice** | one agent, defined by one text (described, or shown by example moments) |
+| **thought** | one entry in the stream, from a voice, the person, the world, or a cadence |
+| **person** | the human participant. The frame decides how their thoughts are labelled ("conscious" in a mind, "chair" in a council, "you" by default). v0 called this kind `conscious` |
 | **stream** | the single shared, ordered record of thoughts |
-| **listen** | a voice reading the stream and deciding whether to speak; its result (mood, reason, speak or not) is itself recorded and visible to everyone |
-| **forming** | the state of a voice that has decided to speak and is composing; visible to the others |
-| **sense** | a standing instruction for what to bring in from the outside world (news, feeds); a sense periodically fetches and drops thoughts into the stream |
-| **cadence** | a decision procedure: a resolution is posed, the voices vote, the mind resolves |
+| **listen** | a voice reading the stream and deciding whether to speak; its result (mood, reason, speak or not) is recorded and visible to everyone |
+| **forming** | a voice that has decided to speak and is composing; visible to the others |
+| **memory** | older thoughts beyond the recent window that are related to what is being said now, retrieved by meaning and shown to voices |
+| **sense** | a standing instruction for what to bring in from the outside world; a sense periodically reads the feeds the person chose and drops `world` thoughts into the stream |
+| **cadence** | a decision procedure: a resolution is posed, the voices weigh each other, vote, and the result is recorded |
+| **digest** | a summary of a stretch of the stream, written by a non-voice summariser when the room goes quiet: the question, each voice's position, what changed, the outcome |
+| **student / teacher** | the small local model that makes listen decisions, and the strong model whose decisions it learns from |
 
 ## Two principles
 
-**Give as much information as possible.** Inside a head nothing is hidden.
-Every voice sees the whole recent stream, a few random older thoughts, every
-other voice's latest *listen* (whether it chose to speak, its mood, its
-reason), and which voices are currently *forming* a thought. If everyone is
-bored, each voice can see that everyone is bored. If three voices are
-already forming replies, a fourth can see that and decide to wait.
+**Give as much information as possible.** Nothing in the room is hidden. Every voice sees the
+whole recent stream, a few random older thoughts, older thoughts related to the present
+(memories), every other voice's latest listen (whether it chose to speak, its mood, its
+reason), and which voices are currently forming a thought. If everyone is bored, each voice can
+see that everyone is bored. If three voices are already forming replies, a fourth can see that
+and decide to wait.
 
-**Prescribe as little as possible.** Everything that is *behaviour* is a
-model judgement, not code:
+**Prescribe as little as possible.** Everything that is *behaviour* is a model judgement, not
+code:
 
-- whether a voice speaks now, waits, or stays quiet
-- whether it is bored, irritated, curious, or done
-- whether the mind is repeating itself and should stop
-- whether a thread has drifted so far from what the person or the world
-  brought in that it is time to pause
-- whether an old thought is worth pulling back in
+- whether a voice speaks now, waits, or stays quiet;
+- whether it is bored, irritated, curious, or done;
+- whether the room is repeating itself and should stop;
+- whether a thread has drifted so far from what the person or the world brought in that it is
+  time to pause;
+- whether an old thought is worth pulling back in.
 
-Code owns only what a model cannot: the stream, its ordering, persistence,
-fan-out, and concurrency. There is no topic object, no session, no turn
-order, no loop cap, no coordinator. "Quiet" is not a state the code enters;
-it is what happens when every voice listens and chooses not to speak.
+Code owns only what a model cannot: the stream, its ordering, persistence, fan-out,
+concurrency, retrieval, and calls to the outside world. There is no topic object, no session,
+no turn order, no loop cap, no coordinator. "Quiet" is not a state the code enters; it is what
+happens when every voice listens and chooses not to speak.
 
-Negative feedback against extremes (endless repetition, runaway tangents,
-voices talking only to each other) is also left to the model, through the
-listen prompt. The anchor is that original thoughts come only from the
-person or from senses the person chose; the voices' job is to work on
-those, not to entertain themselves. The prompt says so, and says that a
-long drift far from any origin is a reason to stop; nothing in the code
-enforces it.
+Negative feedback against extremes (endless repetition, runaway tangents, voices talking only
+to each other) is also left to the model, through the listen prompt. The anchor is that
+original topics come only from the person or from senses the person chose; the voices' job is
+to work on those, not to entertain themselves. Nothing in the code enforces it.
+
+A third principle follows from the first two and governs every addition in v1:
+
+**Frameworks serve the edges, never the centre.** LangGraph orchestrates work *inside* a sense
+run and *inside* a cadence. It never coordinates voices, never decides who speaks, never owns
+the stream. MCP connects the room to the outside world and the outside world to the room; it
+never becomes the room.
+
+## Frames and ensembles
+
+An ensemble is a directory:
+
+```text
+ensembles/<name>/
+  frame.md
+  voices/<voice>/voice.md
+  senses.yaml
+```
+
+`frame.md`:
+
+```markdown
+---
+label: mind               # shown in the UI
+person_label: conscious   # tag for the human's thoughts
+---
+You are one voice inside a single human mind. The others are other voices of the same mind.
+The person — the conscious, deliberate part — sometimes drops a thought in; the world comes in
+through news the person chose to follow. ...
+```
+
+The frame is free text. It is placed first in every system prompt (listen, speak, cadence,
+sense, digest), followed by the **engine text** — how the stream is rendered, when to speak,
+boredom, cadence mechanics, output schemas — and only then, for voices, the voice text. Engine
+text must be framing-neutral: it never mentions minds, heads, people, or groups.
+
+Three ensembles ship as examples:
+
+- `mind` — the v0 voices (`ride`, `rest`, `make`, `learn`, `people`, `fair`, `doubt`) and
+  frame; reproduces v0 behaviour. These voices are placeholders: once phase 1 runs, the person
+  replaces them with voices written from their own head (described or shown), and the
+  shipped set becomes an example ensemble rather than the default.
+- `council` — a handful of distinct people deciding something together (e.g. a family
+  deciding whether to move cities).
+- `public` — groups of people in one city reacting to the news its senses bring in.
+
+One ensemble runs per instance (`ENSEMBLE=mind`). Switching means another instance or another
+database. Running several ensembles inside one instance would require namespacing the stream,
+Redis keys and SSE per ensemble; it is deliberately not built (see *Not built*).
 
 ## What a voice is
 
-A voice is not a job title and not a bare abstraction. It is a *want*,
-rooted in something concrete, that argues for a value when it talks. "The
-one who wants to be on the bike tomorrow instead of at the desk" is a
-voice; so is "the one who keeps checking the group chat". When an abstract
-question lands (a headline about hiring freezes, "should I take the
-specialization"), concrete voices drag it to the ground — *what does this
-do to my weekends?* — and that is what makes the discussion feel like a
-head rather than a seminar. Purely abstract voices (fairness, doubt) are
-allowed too; a good mind has a few of each.
+A voice is not a job title and not a bare abstraction. It is a *want*, rooted in something
+concrete, that argues for a value when it talks.
 
-Voices are meant to be **personal**. The ones shipped in the repo are
-examples; the person is expected to rewrite them to match their own head.
-That is why a voice is nothing but a text file / a text field, with no
-logic attached.
+- In a **mind**, "the one who wants to be on the bike tomorrow instead of at the desk" is a
+  voice; so is "the one who keeps checking the group chat". When an abstract question lands,
+  concrete voices drag it to the ground — *what does this do to my weekends?* — and that is
+  what makes the discussion feel like a head rather than a seminar. Purely abstract voices
+  (fairness, doubt) are allowed too.
+- For **a person**, the voice is that person: what they want out of this, what they believe,
+  how they talk, what they always bring up.
+- For **a group**, the voice speaks for the group's typical concerns and stakes, in a register
+  members of that group would recognise, and acknowledges that the group disagrees internally.
+  It must not be a caricature. A group voice that only ever says one thing is badly written.
 
-A voice can be written two ways, and the prompt must accept both — the
-model is the one that interprets the text, not code:
+Voices are meant to be **personal**. The shipped ones are examples; the person is expected to
+write their own. That is why a voice is nothing but text, with no logic attached.
+
+A voice can be written two ways, and the prompts must accept both — the model interprets the
+text, not code:
 
 *Described* — the headings are a suggestion, not a schema:
 
@@ -85,68 +174,64 @@ model is the one that interprets the text, not code:
 ---
 # optional model overrides
 ---
-**Wants**   — what this voice is after, concretely. One or two sentences.
+**Wants**   — what this voice is after, concretely.
 **Believes** — the value underneath, in its own words.
-**Sounds like** — how it talks: fast/slow, warm/dry, first to speak or last.
-**Shows up when** — what kind of thought pulls it in; what bores it.
+**Sounds like** — how it talks.
+**Shows up when** — what pulls it in; what bores it.
 ```
 
-*Shown* — a few real moments, and nothing else. The person writes down
-situations in which this voice actually spoke in their head and what it
-said, and leaves it to the model to work out what the voice is:
+*Shown* — a few real moments, and nothing else, and the model works out the voice:
 
 ```markdown
 ---
 ---
 - 11pm, laptop open, work done: "ten more minutes of this and then bed."
 - A friend cancelled: relief first, guilt a second later.
-- Saw the job posting: "I could do that. I'm not going to apply."
 ```
 
-Shown voices are expected to be the more honest ones, because they skip
-the step where the person decides what they *should* be. The speak prompt
-tells the model to speak as the one who would have had those thoughts,
-in the same register, in a new situation — not to quote them.
-
-Voices are **stateless by design**. Each time a voice listens it looks
-fresh: it has its values and temperament, and it sees what was said
-(including what "it" said earlier), but it is not obliged to agree with its
-past self. Continuity comes from the voice file, not from memory.
+Voices are **stateless by design**. Each listen looks fresh: the voice has its text, and it
+sees what was said (including what "it" said earlier) and what memory retrieves, but it is not
+obliged to agree with its past self. Memory in v1 is *shared* — retrieved from the one stream
+everybody can see — not a private store per voice. Continuity of character comes from the
+voice text.
 
 ## Components
 
 ```text
-conscious ─▶ POST /thoughts ─┐
-senses ──▶ (periodic) ──────┤
-                            ▼
-                      ┌──────────┐  append   ┌────────────┐
-   voice A ──┐        │          │ ────────▶ │ PostgreSQL │ thoughts   (seq = order of record)
-   voice B ──┼──────▶ │  Stream  │           │            │ listens    (every decision, spoken or not)
-   voice C ──┘        │          │ ────────▶ │ Redis      │ recent window · forming set · pub/sub
-       ▲              └──────────┘           └────────────┘
-       │                   │
-       └──── subscribe ◀───┘   every new thought wakes every listening voice
+ person ─▶ POST /thoughts ───────────┐
+ MCP clients (Claude, ...) ─▶ mind MCP server ─┤
+ senses (LangGraph run) ─────────────┤
+   ├─ feeds MCP (ours)                │
+   ├─ Fetch MCP (official)            ▼
+   └─ search MCP (Exa/Tavily, opt.) ┌──────────┐  append   ┌──────────────┐
+                                    │          │ ────────▶ │ PostgreSQL   │ thoughts (seq = order of record)
+   voice A ──┐                      │  Stream  │           │  + pgvector  │ listens · samples · embeddings
+   voice B ──┼──────────────────▶   │          │ ────────▶ │ Redis        │ recent window · forming · pub/sub
+   voice C ──┘                      └──────────┘           └──────────────┘
+       ▲   listen: student (local)        │                       ▲
+       │   speak:  strong model           │                       │
+       └──────── subscribe ◀──────────────┘          embedder (background) ─┘
+ cadence (LangGraph run, checkpointed) ──▶ appends a cadence thought
 ```
 
-- **Stream**: the only shared thing. `append()` writes to PostgreSQL (which
-  assigns `seq`), pushes to the Redis recent window, and publishes on a
-  channel. `recent()` reads the window; `strays()` samples random older
-  thoughts for free association; `listens()` returns each voice's latest
-  decision; `forming()` returns who is composing right now.
-- **Voice**: one asyncio task per voice, defined entirely by
-  `voices/<name>/voice.md`. See the loop below.
-- **Sense**: one task per entry in a list of plain-text instructions
-  ("AI policy news from the last day", "anything about Waterloo co-op
-  hiring"). On a schedule it asks a model (with search) to fetch and
-  summarize, and appends the result as a `world` thought.
-- **Cadence**: started by the conscious, or proposed by a voice. See below.
-- **API**: inject thoughts, read the record, watch live (SSE), read the
-  listen log, start a cadence.
-- **LLM**: two tiers, *listen* (cheap, always on) and *speak* (strong,
-  only when a voice speaks), each pointed at any provider: OpenAI,
-  Anthropic, DeepSeek, Gemini, a local model via Ollama. A voice may
-  override either tier, so different voices can literally be different
-  models.
+- **Stream** — unchanged from v0: the only shared thing. `append()` commits to PostgreSQL
+  (which assigns `seq`), then pushes to the Redis window and publishes.
+- **Voice** — one asyncio task per voice; the v0 loop, plus a memories block in its context.
+- **Memory** — a background embedder writes an embedding for every thought; voices retrieve
+  related older thoughts by similarity (pgvector).
+- **Sense** — one task per sense; each run is a LangGraph workflow that reads feeds over MCP.
+- **Cadence** — a LangGraph workflow with a checkpointer, started by the person or proposed by
+  a voice.
+- **Digest** — an edge component like a sense: it reads the stream when the room goes quiet
+  (or on request) and appends one `digest` thought. Voices do not wake on `digest` thoughts,
+  so a digest never restarts the discussion; they do see digests in their context afterwards.
+- **MCP** — both directions: Polyphony is an MCP *client* (senses call feeds, fetch and
+  search servers) and an MCP *server* (other AI apps can speak into the room, read it, and
+  start cadences).
+- **LLM layer** — provider-agnostic, two tiers (*listen*, *speak*) plus a *teacher* and an
+  *embedder*; listen runs on a local small model by default.
+- **Observability and evals** — every model call is traced; scenarios can be run and judged
+  offline.
 
 ## The voice loop
 
@@ -158,427 +243,450 @@ idle ──(stream moved)──▶ listen ──(no)──▶ idle
                      mark forming ──▶ wait pause ──▶ re-read stream ──▶ speak ──▶ append ──▶ idle
 ```
 
-1. **Listen** (cheap model). Input: recent window + strays + everyone's
-   latest listen + who is forming. Output:
-   `{speak, mood, reason, pause_seconds, propose_cadence}`. Boredom, fatigue, "we are
-   circling", "this has drifted too far", "three others are already on it"
-   are all legitimate. `pause_seconds` lets a voice hang back instead of
-   answering instantly.
-2. **Speak** (strong model), only if listen said so. The voice is marked
-   *forming* so the others can see it. After the pause it re-reads the
-   stream, so the thought responds to what is actually there, then writes
-   in first person with no name tag and no obligation to be consistent
-   with earlier thoughts.
+1. **Listen** (student model). Input: frame, voice text, recent window, strays, memories,
+   everyone's latest listen, who is forming. Output:
+   `{speak, mood, reason, pause_seconds, propose_cadence}`.
+2. **Speak** (strong model), only if listen said so. The voice is marked forming. After the
+   pause it re-reads the stream, then writes its thought.
 
-While a voice is forming it does not take new triggers; when its thought is
-appended it goes back to idle and the next stream movement wakes it again.
-This is the only throttle in the system, and it is a cost measure, not a
-behaviour rule.
+While forming, a voice takes no new triggers; afterwards the next stream movement wakes it
+again. This is the only throttle, and it is a cost measure, not a behaviour rule.
 
 ## Concurrency and ordering
 
-Voices run truly concurrently and may speak over each other; that is
-allowed. What the system guarantees is a single, unambiguous **order of
-record**:
+Unchanged from v0:
 
-- `seq` is a PostgreSQL `BIGSERIAL`; the database decides the order.
-- The Redis window is a cache. Two voices can commit 5 and 6 and push 6
-  before 5, so the window is a sorted set scored by `seq` (trimming by
-  arrival order could drop a newer thought and keep an older one). A cold
-  window is refilled from PostgreSQL.
-- Wake-ups are coalesced: if several thoughts land while a voice is busy,
-  it reacts once to the newest state.
-- Nothing else is shared, so voices can later move to separate processes or
-  containers without code changes; they already coordinate only through
-  PostgreSQL and Redis.
+- `seq` is a PostgreSQL `BIGSERIAL`; the database decides the order of record.
+- The Redis window is a cache: a sorted set scored by `seq` (pushes can arrive out of order);
+  a cold window is refilled from PostgreSQL.
+- Wake-ups coalesce: thoughts landing while a voice is busy cause one further listen against
+  the newest state.
+- Voices coordinate only through PostgreSQL and Redis, so they can move to separate processes
+  without code changes.
 
-## Cadence (decision)
+v1 adds two background writers that must respect the same rule — the embedder and the shadow
+teacher — and neither may block a voice or reorder anything.
 
-An explicit, experimental procedure for settling a question. It can be
-started two ways:
+## Memory
 
-- **By the conscious.** The person presses a button and types a resolution.
-  The cadence begins immediately; no permission needed.
-- **By a voice.** A voice may, as part of a listen, propose a cadence with a
-  resolution (the `propose_cadence` field). That proposal is first put to a quick yes/no vote among all
-  voices (one voice, one vote, simple majority: *is this worth deciding
-  now?*). If it passes, the cadence begins; if not, the proposal stays in
-  the stream as an ordinary thought and the discussion goes on.
+The recent window (default 40 thoughts) is what a voice "has in mind". Strays (a few random
+older thoughts) give free association. v1 adds **memories**: the older thoughts most related
+to what is being said now.
 
-Once begun, a cadence runs in two rounds so that the vote is weighted by
-relevance rather than one-voice-one-vote:
+- Every thought gets an embedding, written by a background task (`thought_embeddings`,
+  pgvector, HNSW cosine index). Embedding never sits on the append path.
+- On listen and speak, the last few thoughts of the window are embedded as the query; the top
+  k (default 5) most similar thoughts **older than the window** are rendered as a separate
+  memories block, with their `seq` and how long ago they were.
+- The query depends only on the stream state, not on the voice, so it is computed once per
+  window tail: the result is cached in Redis under the tail `seq` (short TTL) and every voice
+  listening against that state reuses it. N voices cost one embedding and one vector search
+  per stream move, not N.
+- Strays stay: memories are relevance, strays are serendipity. Both are labelled as such.
+- Embeddings run locally by default (Ollama, `nomic-embed-text`); any embedding provider the
+  LLM layer supports can be configured.
 
-1. **Standing.** Each voice reads the discussion and the resolution and
-   proposes a weight for *every* voice (including itself) on this
-   question: who has expertise here, who has the most at stake. Weights are
-   averaged across proposals.
-2. **Vote.** Each voice votes for / against / abstain with a one-line
-   reason. The weighted result, the reasons, and the weights are appended
-   to the stream as a `cadence` thought, visible to everyone afterwards
-   like any other thought.
+This is retrieval over the room's own history — the modern form of what used to be called
+RAG — and it is how "topics can reconnect to something from long ago" becomes real rather than
+dependent on a lucky stray.
 
-It is deliberately a separate, optional mechanism, not the normal way the
-mind decides. Most of the time the mind should settle on its own.
+## Senses
 
-## Deliberately not built
+A sense is a standing instruction plus the sources the person chose:
 
-- Topics or sessions.
-- Loop limits, cooldowns, speak quotas.
-- Conductor, scheduler, turn order.
-- Per-voice memory beyond the stream.
+```yaml
+- name: world
+  instruction: "The most important world news of the last day."
+  every_minutes: 240
+  feeds: [https://feeds.bbci.co.uk/news/world/rss.xml, https://www.cbc.ca/webfeed/rss/rss-world]
+  search: false
+```
+
+v0 senses depended on a provider's built-in web search, so DeepSeek and Ollama could not run
+them. v1 senses read the person's chosen feeds through MCP and work with any provider. Each
+run is a small LangGraph workflow:
+
+```text
+collect ──▶ triage ──▶ [search] ──▶ read ──▶ summarize ──▶ emit
+```
+
+1. **collect** — fetch new entries from the sense's feeds (our feeds MCP server), drop any
+   already seen.
+2. **triage** — the model picks which entries matter for the instruction and, if search is
+   allowed, which background queries to run. It answers in a JSON schema; this is how it
+   chooses tools (see *Decisions*).
+3. **search** — only if queries were requested and a search server is configured.
+4. **read** — full text of the chosen articles through the official Fetch MCP server; on
+   failure, the feed summary.
+5. **summarize** — 0–3 items, grounded only in what was read.
+6. **emit** — the v0 dedup (URL and title fingerprints, claim before append) and a `world`
+   thought per new item.
+
+Feeds are the primary source because they are free, they come from the publishers
+themselves, and they are by definition "sources the person chose" — exactly the anchor the
+first principle needs. Search is an optional extra for background, off without a key.
+
+Fetched text is untrusted: it is delimited and marked as data in every prompt and can never
+change which tools run beyond the triage schema.
+
+## Cadence
+
+Unchanged in meaning from v0: started by the person (immediately) or proposed by a voice
+(first a simple-majority yes/no among all voices), then two rounds — **standing** (each voice
+proposes a weight for every voice; averaged and normalised) and **vote** (for / against /
+abstain with one line; weighted result, passes above 0.5) — and a `cadence` thought records
+everything.
+
+v1 runs the procedure as a LangGraph workflow with a PostgreSQL checkpointer:
+
+```text
+standing (fan-out) ──▶ weights ──▶ vote (fan-out) ──▶ tally ──▶ [confirm] ──▶ record
+```
+
+- An interrupted cadence (restart, crash) resumes from the last finished step instead of
+  asking every voice again.
+- Optional **confirm**: the person can ask for a pause before the result is recorded.
+- The frame decides what a cadence *means* (the mind settles; the council decides; the city
+  polls itself); the procedure is the same.
+
+## Models
+
+Two tiers, as in v0, each pointed at any provider (OpenAI, Anthropic, Gemini, DeepSeek,
+Ollama), and per-voice overrides:
+
+| tier | runs | default |
+|---|---|---|
+| **listen** (student) | every stream move, for every voice | a local small model via Ollama (`qwen2.5:3b`; `qwen2.5:1.5b` on 8 GB machines) |
+| **speak** | only when a voice speaks; cadence rounds | a strong hosted model |
+| **teacher** | sampled listens in the background; synthetic data generation | defaults to the speak model |
+| **embed** | every thought, in the background | local `nomic-embed-text` via Ollama |
+
+Listen is the hot path and the main token cost, so it runs locally. Its decision is a narrow,
+fixed-schema judgement — exactly the kind of task a small fine-tuned model does well.
+
+Local listen has a **latency budget**. Every stream move triggers one listen per voice, each a
+prompt of a few thousand tokens. Ollama serves one request per model at a time unless
+`OLLAMA_NUM_PARALLEL` is raised, so seven voices can queue for tens of seconds and the room
+reacts in slow motion. Therefore:
+
+- the README documents `OLLAMA_NUM_PARALLEL` (sized to the voice count and memory) and
+  `OLLAMA_KEEP_ALIVE` (so the model stays loaded);
+- tracing records queue wait separately from model time (client latency minus Ollama's
+  reported `total_duration`), and prefill tokens separately from generated tokens;
+- the target is a p95 listen latency under 10 s for the `mind` ensemble on the developer's
+  machine, recorded in the README with the hardware it was measured on.
+
+### Distilling the listen decision
+
+The goal is a small local model fine-tuned to make listen decisions the way the teacher would,
+replacing the off-the-shelf local model by changing one setting.
+
+- **Training data: synthetic self-play.** An offline simulator runs the real engine — real
+  prompt rendering, real ensembles — with the teacher on both tiers, accelerated, from a set
+  of seed topics across all shipped ensembles. Every listen of every voice is recorded with
+  its exact input and the teacher's decision. Labels are generated through providers' batch
+  APIs where available. The speak/quiet balance is controlled at export time.
+- **Real data, via a shadow teacher.** In normal runs a small share of listens (default 5%)
+  is also sent to the teacher in the background; the voice acts only on the student's
+  decision. Real data is what proves the model works; synthetic data alone would only prove it
+  imitates the simulator.
+- **Real data also trains.** Self-play under the teacher never reaches the streams the student
+  itself produces; shadow pairs come from exactly those streams (the DAgger idea). Shadow
+  pairs are split by time: pairs before a cutoff may join the training set; the block after
+  the cutoff is the held-out test set and is never trained on. Each training run records its
+  cutoff, so no pair is ever in both.
+- **Training:** LoRA on a ~0.5–1.5B base, in a Colab notebook on a free GPU; export to GGUF and
+  an Ollama model named `polyphony-listen`.
+- **Switching:** `LISTEN_MODEL=polyphony-listen`. No code change.
+- **Ceiling:** the teacher runs at non-zero temperature and does not agree with itself. A
+  fixed sample of held-out inputs is labelled by the teacher twice, in independent calls; its
+  self-agreement on `speak` is the ceiling. A student is judged against that ceiling, not
+  against 100%.
+- **Proof:** agreement with the teacher on `speak` (accuracy, precision and recall for
+  `speak=true`, since most listens are quiet), JSON validity, latency and token cost —
+  reported side by side for the off-the-shelf student, the fine-tuned student, running listen
+  on the teacher, and the teacher's self-agreement ceiling.
+
+## MCP, both directions
+
+**Client.** Senses use three MCP servers:
+
+| server | owner | role |
+|---|---|---|
+| `polyphony-feeds` | this repo | fetch RSS/Atom feeds; stateless, no keys, SSRF-guarded |
+| `mcp-server-fetch` | official reference server | full article text as markdown |
+| Exa or Tavily | the vendor | optional web search, only with an API key |
+
+Community MCP servers are not used: a server runs with whatever access it is given, so only
+our own code, official reference servers and vendor-maintained servers are allowed.
+
+**Server.** Polyphony exposes itself as an MCP server (stdio and streamable HTTP) with
+`say(content)`, `read_stream(after, limit)`, `start_cadence(resolution)` and `list_voices()`,
+implemented over the HTTP API. Any MCP-capable AI app can then bring a question into the room
+and read what the voices make of it.
+
+There is no auth, so nothing listens beyond the machine by default: the streamable HTTP
+transport binds to `127.0.0.1` (`MCP_HTTP_HOST`), and Docker Compose publishes the HTTP API
+as `127.0.0.1:8000`. Exposing either further is an explicit choice, and the README says what
+it means.
+
+## Observability and evals
+
+- **Tracing.** Every model call records tier, provider, model, purpose, voice, latency, input,
+  output and cached tokens, and success. `GET /stats` and a UI panel summarise them, along with
+  the live student–teacher agreement.
+- **Evals.** Scenarios (an ensemble, a seed stream, a budget, a description of good) run
+  against real models in their own namespace (see *Namespacing*); a judge model scores the
+  outcome first — does the digest answer the seed with a decision or a clear map of
+  positions — then repetition, voice fidelity, engagement with the seed, convergence, and for
+  senses, grounding. Runs can be
+  compared before a prompt or model change is kept. The same harness reports the distillation
+  numbers above.
+
+## Decisions
+
+- **One ensemble per instance, namespaced from the start.** Multi-ensemble in one process
+  would touch the stream core (queries, SSE); the reframing is achieved without it. But every
+  Redis key carries a configurable prefix and the database is chosen per instance, so evals,
+  the simulator and a live room can share one PostgreSQL server and one Redis without seeing
+  each other. This costs one setting now and is most of the way to multi-ensemble later.
+- **Outcome first.** A run is good if it leaves a decision or a clear map of positions; the
+  digest makes that readable and the evals judge it.
+- **Most-shared prompt text first.** frame → engine → voice → stream, so the frame and engine
+  prefix is identical across voices and providers' prefix caches (and Ollama's KV cache) hit.
+- **One memory query per stream state.** Retrieval depends on the stream, not the voice.
+- **Shadow data trains and tests, split by time.** It covers the student's own distribution;
+  the time split keeps the test set honest.
+- **Frame text + neutral engine text.** The only thing that made v0 "a mind" was wording in
+  the prompts; moving it into data generalises the product without touching the engine.
+- **LangGraph only inside senses and cadence.** Both are fixed, multi-step, stateful
+  workflows that benefit from steps, budgets, resumability and confirmation. The voices are
+  the opposite — decentralised and event-driven — and a graph over them would be a conductor.
+- **Tools chosen through JSON, not native tool-calling.** Small local models often lack tool
+  calling; a schema-constrained JSON choice works on every provider and keeps tool execution
+  in code we control.
+- **Feeds before search.** Free, attributable, chosen by the person, and true to the first
+  principle; search is an add-on.
+- **Local listen, strong speak.** Listen is frequent and narrow; speak is rare and needs
+  quality.
+- **Synthetic data to train, real data to judge.** Fast to produce, honest to evaluate.
+- **Shared memory, stateless voices.** Retrieval reads the room's history; voices still look
+  fresh each time.
+
+## Not built (deliberately)
+
+- Topics or sessions; loop limits, cooldowns, speak quotas; conductor, scheduler, turn order.
+- Any framework orchestration of voices.
+- Private per-voice memory stores.
+- Several ensembles in one process (namespacing exists; per-ensemble routing does not).
+- Native tool-calling in the LLM layer.
+- Auth, multi-user, voice-to-voice private channels.
 
 ## Open questions
 
-- Sense scheduling and dedup: how often, and how to avoid dropping the
-  same headline in twice.
-- How many strays to sample, and whether to bias toward older or toward
-  thoughts the current voice wrote.
+- How many strays versus memories, and whether memories should favour thoughts by the current
+  voice.
+- Whether group voices need a frame-level reminder about internal diversity beyond the voice
+  text.
+- Whether the student should also take over the cadence proposal yes/no vote.
 
 ---
 
-# Implementation notes (v0)
-
-This section is for whoever builds the first version. Everything above is
-the *why*; this is the *what*, pinned down so the build does not drift.
-Where this section and the prose above disagree, this section wins for v0.
+# Implementation notes (v1)
 
 ## Stack
 
-- Python 3.12, `asyncio` throughout. One process runs the API and every
-  voice and sense as tasks; nothing requires multiple processes in v0, but
-  nothing may prevent it later (no in-process shared state between voices).
-- FastAPI + uvicorn for the API. SSE via `StreamingResponse`; no websockets.
-- PostgreSQL 16 via SQLAlchemy 2.x async + asyncpg. Schema via
-  `Base.metadata.create_all` on startup in v0; Alembic can come later.
-- Redis 7 via `redis.asyncio`: recent window (list), forming set, pub/sub.
-- Provider-agnostic LLM layer (see *LLM providers* below). Each tier
-  picks a provider, model, base URL and key independently.
-- `pydantic-settings` for config from `.env`. Docker Compose for
-  mind + postgres + redis. No frontend framework in v0: one static HTML
-  page served by FastAPI is enough.
+v0 stack, plus:
+
+- PostgreSQL image `pgvector/pgvector:pg16` (extension `vector`).
+- `langgraph` (+ its PostgreSQL checkpointer for cadences), `mcp` (official Python SDK),
+  `feedparser`, `httpx`.
+- Ollama on the host for listen and embeddings. On macOS, Docker cannot use the GPU, so Ollama
+  runs natively and the app reaches it at `http://host.docker.internal:11434`. An optional
+  `ollama` service (compose profile `ollama`) serves Linux hosts.
+- Still no migration tool: `polyphony/migrations.py` holds an ordered list of idempotent SQL
+  steps run by `init_db` after `create_all`.
 
 ## Repository layout
 
 ```text
 polyphony/
-  config.py      settings (env)
-  db.py          engine, session, ORM models, init_db()
-  stream.py      Stream: append / recent / strays / listens / forming / subscribe
-  llm.py         Tier(listen|speak), complete_json(), complete_text()
-  prompts.py     all prompt text + render_stream()
-  voice.py       VoiceSpec.load(), Voice.run()
-  sense.py       Sense.run(): periodic fetch -> world thought
-  cadence.py     run_cadence(), propose_cadence()
-  api.py         create_app(stream)
-  main.py        wires everything, starts tasks
-voices/<name>/voice.md      seed voices, loaded into the DB on first start
-senses.yaml                 seed senses, same
-static/index.html           the one page (see UI)
-scripts/say.py, scripts/tail.py
-docs/DESIGN.md, README.md, .env.example, docker-compose.yml, Dockerfile
+  config.py  db.py  migrations.py  stream.py  prompts.py  voice.py  api.py  main.py  supervisor.py
+  llm.py              providers, tiers, structured output, embeddings, tracing hook
+  frame.py            load/seed frames, frame text for prompts
+  memory.py           embedder task, retrieval
+  sense.py            scheduling + dedup (v0) ; delegates a run to sense_graph
+  sense_graph.py      LangGraph sense run
+  cadence.py          API surface (v0) ; delegates to cadence_graph
+  cadence_graph.py    LangGraph cadence with checkpointer
+  digest.py           quiet detection, digest writing (edge component, not a voice)
+  mcp_client.py       sessions to MCP servers, call(), restart, shutdown
+  mcp_servers/
+    feeds.py          polyphony-feeds (FastMCP, stdio)
+    mind.py           Polyphony as an MCP server
+  evals/              scenarios, runner, judge, report
+ensembles/
+  mind/  council/  public/      frame.md, voices/, senses.yaml
+simulate/                       offline self-play for synthetic listen data
+scripts/                        say.py, tail.py, export_listen_samples.py, eval.py,
+                                eval_listen_student.py, backfill_embeddings.py
+training/distill_listen.ipynb   Colab notebook (Unsloth, LoRA, GGUF + Modelfile)
+static/index.html
 ```
 
-## Data model (PostgreSQL)
+## Data model changes
 
 ```sql
-thoughts   seq BIGSERIAL PK, author VARCHAR(64), kind VARCHAR(16),
-           content TEXT, mood VARCHAR(80) NULL, meta JSONB NULL,
-           created_at TIMESTAMPTZ DEFAULT now()
-           -- kind: voice | conscious | world | cadence
-           -- meta: cadence result, sense source url, etc.
+-- thoughts: kind 'conscious' renamed to 'person' (migration UPDATE; API accepts the old name);
+--           new kind 'digest' (meta: from_seq, to_seq, outcome = decision | positions)
 
-listens    id BIGSERIAL PK, voice VARCHAR(64), trigger_seq BIGINT,
-           speak BOOL, mood VARCHAR(80), reason TEXT, pause_seconds REAL,
-           created_at TIMESTAMPTZ DEFAULT now()
-           -- one row per listen, spoken or not; index (voice, id desc)
+frames            name VARCHAR(64) PK, label TEXT, person_label TEXT, text TEXT, updated_at
 
-cadences   id BIGSERIAL PK, resolution TEXT, proposed_by VARCHAR(64),
-           status VARCHAR(16),   -- proposed | rejected | running | resolved
-           weights JSONB, votes JSONB, result JSONB,
-           created_at, resolved_at
+senses            + feeds JSONB NOT NULL DEFAULT '[]', + search BOOL NOT NULL DEFAULT false
 
-voices     name VARCHAR(64) PK, text TEXT, overrides JSONB NULL,
-           enabled BOOL DEFAULT true, created_at, updated_at
-           -- the record of truth; voices/ on disk only seeds this
+thought_embeddings seq BIGINT PK REFERENCES thoughts(seq), model TEXT,
+                   embedding vector(N), created_at        -- HNSW (vector_cosine_ops)
 
-senses     name VARCHAR(64) PK, instruction TEXT, every_minutes INT,
-           enabled BOOL DEFAULT true, last_run TIMESTAMPTZ NULL
+llm_calls         id BIGSERIAL PK, tier, provider, model, purpose, voice NULL,
+                  latency_ms INT, queue_ms INT NULL, input_tokens INT, output_tokens INT,
+                  cached_input_tokens INT,
+                  ok BOOL, error TEXT NULL, created_at
 
-sense_log  id BIGSERIAL PK, sense VARCHAR(64), fingerprint VARCHAR(128) UNIQUE,
-           seq BIGINT NULL, fetched_at TIMESTAMPTZ
-           -- fingerprint = sha256 of normalized title/url; dedup across runs
+listen_samples    id BIGSERIAL PK, listen_id BIGINT NULL, source VARCHAR(16),  -- live | synthetic
+                  ensemble VARCHAR(64), voice VARCHAR(64), system TEXT, prompt TEXT,
+                  student_provider, student_model, student_decision JSONB NULL,
+                  teacher_provider, teacher_model, teacher_decision JSONB NULL, created_at
 ```
 
-`seq` is the only ordering anywhere. Never order by `created_at`.
+Cadence checkpoints live in LangGraph's own tables in the same database.
+
+## Namespacing
+
+`NAMESPACE` (default `polyphony`) replaces the fixed `polyphony:` prefix on every Redis key,
+and `DATABASE_URL` selects the database. Evals and the simulator set their own `NAMESPACE`
+and database automatically, so they never touch a live room.
 
 ## Redis keys
 
-```text
-polyphony:thoughts            pub/sub channel; payload = thought JSON
-polyphony:recent              sorted set of thought JSON scored by seq, trimmed to RECENT_WINDOW
-polyphony:forming             set of voice names currently composing
-polyphony:listen:<voice>      string, latest listen JSON for that voice
-polyphony:control             pub/sub; {"voices": "changed"} / {"senses": "changed"}
-polyphony:cadence:running:<id> set while a cadence runs (TTL 15 min, so a crash can't freeze the mind)
-```
+v0 keys under `<NAMESPACE>:`, plus `<NAMESPACE>:control` messages `{"frame": "changed"}` and
+`<NAMESPACE>:memq:<seq>` (cached memory retrieval for a window tail, TTL 5 min).
 
-**Supervisor.** `main.py` does not start a fixed set of tasks. A
-supervisor reads the `voices` and `senses` tables, starts one task per
-enabled row, and listens on `polyphony:control`; on a change message it
-diffs the tables against running tasks and starts, stops, or restarts
-(text changed) the affected ones. Every write to those tables through
-the API publishes on the control channel. This is what makes "add a voice
-from the UI" work without a restart, and it also works across processes.
-
-`append()` order: commit to PostgreSQL first (get `seq`), then in one
-pipeline ZADD + ZREMRANGEBYRANK + PUBLISH. Readers of `recent` always sort by `seq`.
-If `recent` is empty, refill from PostgreSQL (last RECENT_WINDOW rows).
-
-## API
+## API additions
 
 ```text
-GET  /health
-POST /thoughts            {content, author="conscious", kind="conscious"|"world"} -> thought
-GET  /thoughts?after=0&limit=200
-GET  /stream              SSE, one event per thought (any kind)
-GET  /listens?limit=100   latest listen rows
-POST /cadence             {resolution} -> starts immediately (conscious)
-GET  /cadence/{id}
-GET  /voices              [{name, text, overrides, enabled, forming, last_listen}]
-POST /voices              {name, text, overrides?}           -> publishes control
-PUT  /voices/{name}       {text?, overrides?, enabled?}      -> publishes control
-DELETE /voices/{name}                                         -> publishes control
-GET  /senses              [{name, instruction, every_minutes, enabled, last_run}]
-POST /senses  PUT /senses/{name}  DELETE /senses/{name}       -> publishes control
-GET  /                    static/index.html
+GET  /frame                    {name, label, person_label, text}
+PUT  /frame                    {label?, person_label?, text?}       -> publishes control
+POST /thoughts                 kind "person" (alias "conscious") | "world"
+GET  /senses ... POST/PUT      + feeds[], search
+POST /cadence                  {resolution, confirm?: bool}
+POST /cadence/{id}/confirm     resumes a cadence paused before recording
+GET  /stats?hours=24           calls, tokens, latency per tier/provider; student–teacher agreement
+GET  /memories?seq=<n>&k=5     debug: what memory retrieves for a point in the stream
+POST /digest                   write a digest now for everything since the last one
+GET  /digests?limit=20         recent digests
 ```
 
-`GET /stream?after=<seq>` replays from the record first, then goes live, so
-a reconnecting client misses nothing (it also honours `Last-Event-ID`).
+## UI additions
 
-## UI (v0, one page)
+Frame editor (label, person label, text); feeds and search fields on senses; a "confirm
+before recording" checkbox on Decide; digests rendered as cards in the stream with a "digest
+now" button; a stats panel with listen queue wait; a memories line under each thought in a
+debug view. Still one page, no build step.
 
-Plain HTML + a little JS, served by FastAPI; no build step. Layout: the
-stream down the middle (live via SSE), the listen log beside it (one line
-per voice: mood, reason, spoke or quiet, who is forming — refreshed every
-few seconds), and a sidebar with four actions:
-
-1. **Think** — a textbox; submit = `POST /thoughts` as `conscious`.
-2. **Decide** — a textbox for a resolution; submit = `POST /cadence`.
-   Cadence results render inline in the stream with weights and votes.
-3. **Voices** — list with enable/disable; add (name + text, optional model
-   overrides); edit in place; delete. Changes take effect live.
-4. **Senses** — list; add (name + instruction + every N minutes); enable /
-   disable; delete.
-
-Nothing else. The page exists so the mind can be watched and fed; it is
-not the product.
-
-## Config (.env)
+## Config additions (.env)
 
 ```text
-DATABASE_URL, REDIS_URL
-LISTEN_PROVIDER=openai  LISTEN_MODEL=gpt-4o-mini   LISTEN_BASE_URL=  LISTEN_API_KEY=
-SPEAK_PROVIDER=anthropic SPEAK_MODEL=claude-sonnet-4-5 SPEAK_BASE_URL=  SPEAK_API_KEY=
-SENSE_PROVIDER=  SENSE_MODEL=   # needs web search; empty = use the speak tier
-# provider: openai | anthropic | gemini | deepseek | ollama  (see LLM providers)
-RECENT_WINDOW=40   STRAYS=4   ENABLED_VOICES=   PORT=8000
+ENSEMBLE=mind
+LISTEN_PROVIDER=ollama  LISTEN_MODEL=qwen2.5:3b  LISTEN_BASE_URL=   # host.docker.internal on macOS
+TEACHER_PROVIDER=  TEACHER_MODEL=  TEACHER_SAMPLE_RATE=0.05          # empty = speak tier
+EMBED_PROVIDER=ollama  EMBED_MODEL=nomic-embed-text  EMBED_DIM=768  MEMORY_K=5
+MCP_FETCH_COMMAND="uvx mcp-server-fetch"
+MCP_FEEDS_COMMAND="python -m polyphony.mcp_servers.feeds"
+EXA_API_KEY=  TAVILY_API_KEY=
+SENSE_MAX_ITEMS=3  SENSE_READ_MAX_ARTICLES=3
+NAMESPACE=polyphony
+DIGEST_IDLE_SECONDS=90       # quiet this long after a thought with nobody forming -> digest
+MCP_HTTP_HOST=127.0.0.1
 ```
 
-## Voice loop (normative)
-
-```python
-async def run(self):
-    listener = create_task(self._listen_channel())   # sets self._wake on any thought not by me
-    while True:
-        await self._wake.wait(); self._wake.clear()
-        await self.listen()
-
-async def listen(self):
-    recent  = await stream.recent()
-    if not recent: return
-    strays  = await stream.strays(before_seq=recent[0]["seq"], n=STRAYS)
-    others  = await stream.listens_latest()          # every voice's last listen
-    forming = await stream.forming()
-    decision = await llm.complete_json(LISTEN, listen_system(me), render(recent, strays, others, forming, me))
-    await stream.record_listen(me, recent[-1]["seq"], decision)
-    if not decision["speak"]: return
-    await stream.set_forming(me, True)
-    try:
-        await sleep(clamp(decision["pause_seconds"], 0, 60) + uniform(0, 2))
-        recent = await stream.recent()               # re-read: the stream moved while we waited
-        text = await llm.complete_text(SPEAK, speak_system(me, decision), render(recent, strays, others, forming, me))
-        if text: await stream.append(me, "voice", text, mood=decision["mood"])
-    finally:
-        await stream.set_forming(me, False)
-    # wake flag is NOT cleared here: anything that landed while forming
-    # triggers one fresh listen after we return
-```
-
-Wake-ups coalesce because `_wake` is an `asyncio.Event`: N thoughts during
-one listen produce one further listen, against the newest state.
-
-Listen output schema, exactly:
-`{"speak": bool, "mood": str, "reason": str, "pause_seconds": number,
-"propose_cadence": str | null}`. `propose_cadence`, when non-null, is a
-resolution text and starts the proposal vote (see cadence).
-
-## LLM providers
-
-`llm.py` exposes one interface and hides the vendor:
-
-```python
-class Provider(Protocol):
-    async def complete(self, *, model: str, system: str, user: str,
-                       json: bool = False, temperature: float = 0.8,
-                       max_tokens: int = 1024) -> str: ...
-```
-
-Ship these implementations, selected by the `*_PROVIDER` setting:
-
-| provider | SDK | notes |
-|---|---|---|
-| `openai` | `openai` | also used, with a `base_url`, for anything OpenAI-compatible |
-| `deepseek` | `openai` | preset `base_url=https://api.deepseek.com`, key from `DEEPSEEK_API_KEY` |
-| `ollama` | `openai` | preset `base_url=http://localhost:11434/v1`, no key; for local listen models |
-| `anthropic` | `anthropic` | system prompt goes in the `system` field, not a message |
-| `gemini` | `google-genai` | system prompt via `system_instruction` |
-
-JSON mode differs per vendor (OpenAI has `response_format`, Anthropic and
-Gemini do not have an equivalent that is worth relying on), so `json=True`
-means: ask for a JSON object in the prompt, set the vendor option where it
-exists, and *always* extract the first `{...}` from the reply and
-`json.loads` it. A failed parse raises; the voice loop logs and treats it
-as "quiet". Retry once on transient HTTP errors, then give up for that
-listen; never crash the voice task.
-
-Per-voice override: `voice.md` may begin with YAML front matter:
-
-```yaml
----
-listen: { provider: ollama, model: qwen2.5:3b }
-speak:  { provider: deepseek, model: deepseek-chat }
----
-You care about rest ...
-```
-
-Missing keys fall back to the tier's global setting. The point is that the
-mind can be a mixture of models, and that swapping a voice's model is a
-one-line change with no code.
+If Ollama is unreachable, fail loudly naming the setting; never fall back silently to a paid
+tier.
 
 ## Prompts — required content
 
-The exact wording is the implementer's, but the listen prompt must say all
-of the following, and the speak prompt the parts marked *:
+Every prompt is ordered from most shared to least shared, for prompt caching:
+`frame text` → `engine text` (identical for every voice) → `voice text` (where relevant) →
+the rendered stream. Frame and engine text form a prefix shared by every voice in the
+ensemble; putting the voice text earlier would break that prefix at its first byte. Engine
+text keeps all v0 requirements, reworded neutrally:
 
-- You are one voice in a single mind; your name; the voice file verbatim.*
-- You see: the stream, stray memories, every voice's latest listen (mood,
-  reason, spoke or not), who is forming right now.
-- You are never obliged to speak and never obliged to agree with what
-  "you" said before; each look is fresh; only your values are constant.*
-- Reasons to speak: new angle, disagreement, an association (including to
-  a stray memory), a decision forming, a correction, the mind circling.
-- Reasons not to: you would repeat, the thread is done, you're not
-  interested, you're tired or irritated — these are legitimate.
-- Original thoughts come only from the conscious or from the world. If the
-  discussion has drifted far from any of them for a long time, that is a
-  reason to stop. If the mind seems to be repeating itself, stop.
-- Others already forming is a reason to wait or stay quiet; everyone bored
-  is a reason to let it go quiet.
-- You may propose a cadence (a resolution to vote on) if you think the
-  mind should decide.*
-- Speak*: first person, no name tag, no "as I said", any length that fits,
-  may disagree with anyone including yourself, may wander, may concede, may
-  propose to decide and stop. Output only the thought.
+- You see: the stream, stray older thoughts, memories (related older thoughts), every voice's
+  latest listen, who is forming.
+- You are never obliged to speak or to agree with what "you" said before.
+- Reasons to speak; reasons not to (repetition, done, not interested, tired, irritated).
+- Original topics come only from the human or the world; long drift away from them, or
+  repetition, is a reason to stop.
+- Others forming is a reason to wait; everyone bored is a reason to let it go quiet.
+- You may propose a cadence.
+- Speak: no name tag, no "as I said", any length, may disagree with anyone including yourself.
 
-`render()` format: stray memories first (labelled as such), then the
-latest listens as one line per voice (`rest: quiet — tired — "third loop"`),
-then who is forming, then the stream as `[seq] author (mood): content`
-with the current voice marked `(you)` and kinds `[conscious]` / `[world]`
-labelled.
+`render()` adds a memories block after strays (`[seq] author, 3 days ago: content`) and tags
+the human's thoughts with the frame's `person_label`. Structured output: pass the JSON schema
+to providers that support it (OpenAI, Gemini, Ollama `format`); always keep extraction and
+normalisation as the fallback.
 
-## Senses
+## Build order
 
-`senses.yaml`:
+Each phase ends with all tests green and its own commits.
 
-```yaml
-- name: ai-policy
-  instruction: "Anything notable about AI regulation or export controls in the last day."
-  every_minutes: 240
-```
+1. **Frames and ensembles** — frame loading/seeding, neutral engine prompts in shared-prefix
+   order, `person` rename, migrations module, `NAMESPACE`, three ensembles, localhost
+   binding, docs.
+2. **Instrumentation and local listen** — `llm_calls` with queue wait, `/stats`, local listen
+   defaults and Ollama parallelism docs, structured outputs, prompt caching, shadow teacher
+   and `listen_samples`.
+3. **Senses** — feeds MCP server, MCP client, sense graph, sense config, UI.
+4. **Memory** — pgvector, embedder, retrieval, backfill.
+5. **Digest and evals** — digest component and UI, then scenarios, runner, outcome-first
+   judge, compare.
+6. **Cadence graph** — checkpointer, resume, confirm.
+7. **MCP server** — `mind.py`, docs for Claude Desktop / Claude Code.
+8. **Distillation** — simulator, time-split export of synthetic and shadow data, teacher
+   self-agreement, Colab notebook, student eval, `polyphony-listen`.
 
-Each sense is a task: sleep, then call the sense tier (default: the speak
-tier) with the vendor's built-in web search (OpenAI Responses `web_search`,
-Anthropic `web_search` server tool, Gemini Google Search grounding; DeepSeek
-and Ollama have none, so a sense on those fails and logs) and the instruction, asking for 0–3
-items as `{title, url, summary}`. For each item compute fingerprints
-(sha256 of the normalized url, and of the lowercased title — one row each,
-so the same headline is caught under a new URL too); skip if any is in `sense_log`; otherwise
-append a `world` thought (`author=<sense name>`, content = title + summary,
-meta.url) and insert into `sense_log`. A sense that returns nothing appends
-nothing. No sense runs more often than every 30 minutes.
+## v1 is done when
 
-## Cadence
+1. Everything in v0's "done" list still holds with `ENSEMBLE=mind`.
+2. Each example ensemble starts and produces a discussion; editing the frame takes effect live;
+   no engine prompt mentions minds or heads.
+3. With only Ollama and one hosted key, listen runs locally, voices speak, and `/stats` shows
+   calls, tokens, queue wait and student–teacher agreement; the p95 listen latency for `mind`
+   is measured and recorded in the README.
+4. A feed-based sense appends `world` thoughts with any provider; with an Exa or Tavily key and
+   `search: true`, searches inform summaries; without, they are skipped.
+5. A thought from far outside the window that is related to the present appears as a memory,
+   and one stream move with N voices listening performs one retrieval, not N.
+6. A cadence interrupted mid-way resumes without re-asking finished voices; confirm mode
+   pauses before recording.
+7. An MCP client can `say`, `read_stream` and `start_cadence`; by default neither the MCP
+   server nor the API is reachable from another machine.
+8. When the room goes quiet, a `digest` thought appears that states the question, each
+   voice's position and the outcome, and no voice wakes because of it.
+9. An eval run and a live room share one PostgreSQL server and Redis without seeing each
+   other's thoughts.
+10. The simulator produces a labelled dataset; the notebook trains and exports
+    `polyphony-listen`; switching to it is one setting; the student report compares the three
+    students against the teacher's self-agreement ceiling on time-held-out real data.
 
-```text
-propose(by voice)  -> cadences row status=proposed
-                   -> every voice: listen-tier call "worth deciding now? yes/no + one line"
-                   -> simple majority of all voices? no -> status=rejected, proposal text
-                      remains in the stream as the voice's thought; yes -> start
-start(by conscious or passed proposal) -> status=running
-  round 1 (standing): every voice, speak tier: for each voice name, a weight
-      0–1 with one line why (expertise / stake). Average per voice across
-      all proposals; normalise to sum 1.
-  round 2 (vote): every voice, speak tier: for | against | abstain + one
-      line. Result = sum of weights for / sum of weights (for+against).
-      Passes if > 0.5.
-  append thought kind=cadence, author="cadence", content = human-readable
-      summary (resolution, result, weights, each vote + reason);
-      meta = full structured result. status=resolved.
-```
+## Working rules
 
-Cadence calls run concurrently across voices (`asyncio.gather`). Voices do
-not listen/speak on the stream while a cadence they are part of is
-running; the cadence thought wakes them afterwards like any other thought.
-
-## Starter voices
-
-Seven voices following the template above, mixing concrete wants with a
-couple of pure stances. Ship, as examples the person will rewrite:
-
-- `ride` — wants to be outside on the bike; believes in freedom and bodies;
-  bored by administration.
-- `rest` — wants to stop; believes the mind burns out; the one who says
-  "enough, pick one".
-- `make` — wants to ship the thing; believes a rough version today beats a
-  perfect one later.
-- `learn` — wants to understand; everything reminds it of something; derails
-  decisions by making them interesting.
-- `people` — wants company, messages, being liked; believes nothing matters
-  alone; drags abstract questions to "who will I be with".
-- `fair` — pure stance: who pays for this choice, who isn't in the room.
-- `doubt` — pure stance: what is the evidence; admits when doubt is just fear.
-
-No job titles, no roles. Each file is 4–8 sentences.
-
-## v0 is done when
-
-1. `docker compose up` starts mind + postgres + redis with no manual step.
-2. `scripts/say.py "..."` appends a conscious thought; within a minute
-   several voices have listened (visible at `/listens`), some have spoken,
-   and the stream goes quiet on its own without any counter or cap.
-3. Two voices speaking at the same moment produce two thoughts with
-   distinct, increasing `seq`, and `/thoughts` returns them in that order.
-4. A second conscious thought on an unrelated subject can be dropped in
-   mid-discussion and voices engage with either, by their own choice.
-5. `POST /cadence` runs both rounds and appends a `cadence` thought.
-6. One sense configured in `senses.yaml` appends a `world` thought and does
-   not append the same item twice.
-7. `/` shows the stream and the listen log side by side, live, and from it
-   a voice can be added and starts listening without a restart, a sense
-   can be added, a conscious thought dropped in, and a cadence started.
-
-## Not in v0
-
-Auth, multi-user, per-voice memory, voice-to-voice private channels,
-Alembic migrations, metrics dashboards, any UI beyond the single page.
+- Tests keep v0's conventions: real PostgreSQL and Redis, a scripted fake LLM provider, plus a
+  fake MCP client. Every phase adds tests for its own behaviour.
+- `docker compose up` still starts everything with no manual step; optional features stay off
+  without their keys.
+- Every new setting is in `.env.example` with a safe default; README updated per phase; this
+  document's *Decisions* section gains an entry when a phase makes a new choice.
+- All code, comments, docs and commit messages in English. Small, focused commits authored as
+  `Alex Wang <alex119122114@gmail.com>`, with no AI co-author trailers or "Generated with"
+  lines.
+- If existing code blocks the plan, make the smallest change and record it here.
