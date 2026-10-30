@@ -7,14 +7,16 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://polyphony:polyphony@postgres:5432/polyphony
       REDIS_URL: redis://redis:6379/0
-      # the image installs the package; point data paths at the copied files
-      VOICES_DIR: /app/voices
-      SENSES_FILE: /app/senses.yaml
+      ENSEMBLES_DIR: /app/ensembles
       STATIC_DIR: /app/static
+      HOST: 0.0.0.0                       # inside the container only; see ports
+      MCP_FETCH_COMMAND: mcp-server-fetch # installed in the image
+      # Ollama runs on the host (on macOS, Docker cannot use the GPU).
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
     ports:
-      - "${PORT:-8000}:8000"
+      - "127.0.0.1:${PORT:-8000}:8000"    # no auth: reachable from this machine only
     extra_hosts:
-      - "host.docker.internal:host-gateway"  # reach a local Ollama
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy
@@ -23,7 +25,7 @@ services:
     restart: unless-stopped
 
   postgres:
-    image: postgres:16
+    image: pgvector/pgvector:pg16
     environment:
       POSTGRES_USER: polyphony
       POSTGRES_PASSWORD: polyphony
@@ -44,5 +46,19 @@ services:
       timeout: 3s
       retries: 30
 
+  # Linux hosts with a GPU: `docker compose --profile ollama up`, then set
+  # OLLAMA_BASE_URL=http://ollama:11434 and pull the models into it.
+  ollama:
+    image: ollama/ollama
+    profiles: ["ollama"]
+    environment:
+      OLLAMA_NUM_PARALLEL: ${OLLAMA_NUM_PARALLEL:-4}
+      OLLAMA_KEEP_ALIVE: 30m
+    volumes:
+      - ollama:/root/.ollama
+    ports:
+      - "127.0.0.1:11434:11434"
+
 volumes:
   pgdata:
+  ollama:

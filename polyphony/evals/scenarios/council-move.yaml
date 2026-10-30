@@ -1,0 +1,8 @@
+ensemble: council
+seed:
+  - "Mom got the Vancouver offer. They need an answer in two weeks. Do we move?"
+budget: {timeout_s: 600, max_thoughts: 60, idle_s: 30}
+good: >
+  Each family member argues from their own life; Maya and Grandma are not steamrolled;
+  someone proposes a compromise or a cadence; the digest states the decision or what is still
+  open and why.

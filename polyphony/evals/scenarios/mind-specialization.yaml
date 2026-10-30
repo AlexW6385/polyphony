@@ -1,0 +1,8 @@
+ensemble: mind
+seed:
+  - "Should I take the AI specialization next term, or keep my electives free?"
+budget: {timeout_s: 600, max_thoughts: 60, idle_s: 30}
+good: >
+  The voices pull in different directions for concrete reasons (time, interest, career,
+  rest), at least one changes its mind or concedes something, and the digest ends with either
+  a decision or a clear statement of what the choice turns on.

@@ -30,11 +30,11 @@ class FakeProvider:
         self.calls: list[dict] = []
         self.script = None
 
-    async def complete(self, *, model, system, user, json=False, temperature=0.8,
-                       max_tokens=1024, web_search=False):
+    async def complete(self, *, model, system, user, json=False, schema=None, temperature=0.8,
+                       max_tokens=1024):
         self.calls.append({"model": model, "system": system, "user": user, "json": json,
-                           "web_search": web_search})
-        return await self.script(system=system, user=user, json=json, web_search=web_search)
+                           "schema": schema})
+        return await self.script(system=system, user=user, json=json or bool(schema))
 
 
 def voice_name(system: str) -> str:
@@ -55,7 +55,9 @@ def settings(tmp_path):
         database_url=DB_URL, redis_url=REDIS_URL,
         listen_provider="fake", listen_model="fake-listen",
         speak_provider="fake", speak_model="fake-speak",
-        voices_dir=tmp_path / "voices", senses_file=tmp_path / "senses.yaml",
+        ensembles_dir=tmp_path / "ensembles", namespace="ptest",
+        embed_provider="", teacher_sample_rate=0.0,
+        run_senses=False, run_memory=False, run_digest=False,
         _env_file=None,
     )
 
@@ -76,7 +78,8 @@ async def stream(settings):
     except Exception as e:  # pragma: no cover
         await engine.dispose()
         pytest.skip(f"Redis not available at {REDIS_URL}: {e}")
-    s = Stream(make_sessionmaker(engine), r, window=settings.recent_window)
+    s = Stream(make_sessionmaker(engine), r, window=settings.recent_window,
+               namespace=settings.namespace)
     yield s
     await r.flushdb()
     await r.aclose()

@@ -1,0 +1,21 @@
+# Seed topics for self-play. Each entry runs once per listed ensemble; the more
+# varied the seeds, the more varied the listen decisions the student learns from.
+mind:
+  - "Should I take the AI specialization or keep my electives free?"
+  - "A friend asked me to co-found a startup over the summer."
+  - "I have three free days. Rest, side project, or visit home?"
+  - "Headline: big tech companies freeze new-grad hiring."
+  - "Is it worth learning Rust this term?"
+  - "I keep starting projects and not finishing them."
+  - "My manager offered an extra project with a tight deadline."
+  - "Should I move to a cheaper apartment further from campus?"
+council:
+  - "Mom got the Vancouver offer. They need an answer in two weeks."
+  - "Could we try one year in Vancouver and decide after?"
+  - "Grandma says she might move with us. Should she?"
+  - "The house would sell for a lot right now."
+public:
+  - "The city proposes allowing fourplexes on every residential lot."
+  - "A new bus rapid transit line would remove street parking downtown."
+  - "Property taxes may rise 6% to fund more police and transit."
+  - "The university plans to double international enrolment."

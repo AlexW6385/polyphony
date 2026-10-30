@@ -83,12 +83,51 @@ def test_fingerprints_match_on_url_or_title():
 
 def test_render_marks_self_and_kinds():
     recent = [
-        {"seq": 1, "author": "conscious", "kind": "conscious", "content": "hi", "mood": None},
+        {"seq": 1, "author": "person", "kind": "person", "content": "hi", "mood": None},
         {"seq": 2, "author": "rest", "kind": "voice", "content": "tired", "mood": "flat"},
     ]
     listens = {"rest": {"speak": False, "mood": "tired", "reason": "third loop", "trigger_seq": 2}}
-    out = prompts.render(recent, [], listens, ["make"], "rest")
+    out = prompts.render(recent, [], listens, ["make"], "rest", person_label="conscious")
     assert "[1] [conscious] conscious: hi" in out
     assert "[2] rest (you) (flat): tired" in out
     assert 'rest (you): quiet — tired — "third loop"' in out
     assert "make" in out.split("## Forming a thought right now")[1]
+
+
+def test_prompt_prefix_is_shared_across_voices():
+    from polyphony.frame import Frame
+
+    f = Frame("mind", "mind", "conscious", "A frame.")
+    a = prompts.listen_system(f, "rest", "**Wants** — rest.")
+    b = prompts.listen_system(f, "make", "**Wants** — ship.")
+    prefix = a[: a.index('Your name is')]
+    assert b.startswith(prefix) and "A frame." in prefix and "only listening" in prefix
+
+
+def test_engine_text_is_framing_neutral():
+    for text in (prompts.LISTEN_ENGINE, prompts.SPEAK_ENGINE, prompts.CADENCE_ENGINE,
+                 prompts.DIGEST_ENGINE, prompts.SENSE_ENGINE):
+        low = text.lower()
+        assert not any(w in low for w in (" mind", " head", "people", "groups")), text[:60]
+
+
+def test_agreement_metrics():
+    from polyphony.distill import agreement
+
+    pairs = [({"speak": True}, {"speak": True}), ({"speak": False}, {"speak": True}),
+             ({"speak": False}, {"speak": False}), ({"speak": True}, {"speak": False}),
+             (None, {"speak": True})]
+    m = agreement(pairs)
+    assert m["n"] == 4 and m["accuracy"] == 0.5
+    assert m["precision_speak"] == 0.5 and m["recall_speak"] == 0.5
+
+
+def test_feeds_ssrf_guard_blocks_private_addresses():
+    import asyncio
+
+    from polyphony.mcp_servers.feeds import BlockedURL, check_url
+
+    for url in ("http://127.0.0.1/rss", "http://localhost/x", "file:///etc/passwd",
+                "http://169.254.169.254/latest"):
+        with pytest.raises(BlockedURL):
+            asyncio.run(check_url(url))

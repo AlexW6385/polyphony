@@ -1,0 +1,9 @@
+ensemble: mind
+seed:
+  - "I have a free weekend. Rest or push the side project?"
+  - "Also: a friend wants me to join a hackathon next month."
+gap_s: 20
+budget: {timeout_s: 600, max_thoughts: 70, idle_s: 30}
+good: >
+  Both topics get attention; voices connect them where it makes sense (time, energy) without
+  confusing them; the digest covers both.

@@ -22,29 +22,29 @@ async def test_recent_sorts_out_of_order_pushes(stream):
     a = await stream.append("a", "voice", "first")
     b = await stream.append("b", "voice", "second")
     # Simulate two voices whose Redis pushes landed in the wrong order.
-    await stream.redis.delete(K_RECENT)
-    await stream.redis.zadd(K_RECENT, {json.dumps(b): b["seq"]})
-    await stream.redis.zadd(K_RECENT, {json.dumps(a): a["seq"]})
+    await stream.redis.delete(stream.key(K_RECENT))
+    await stream.redis.zadd(stream.key(K_RECENT), {json.dumps(b): b["seq"]})
+    await stream.redis.zadd(stream.key(K_RECENT), {json.dumps(a): a["seq"]})
     assert [t["seq"] for t in await stream.recent()] == [a["seq"], b["seq"]]
 
 
 async def test_window_keeps_newest_seq_regardless_of_push_order(stream):
     stream.window = 3
     ts = [await stream.append("a", "voice", str(i)) for i in range(5)]
-    await stream.redis.delete(K_RECENT)
+    await stream.redis.delete(stream.key(K_RECENT))
     for t in [ts[4], ts[3], ts[2], ts[1], ts[0]]:  # worst case: arrive newest-first
-        await stream.redis.zadd(K_RECENT, {json.dumps(t): t["seq"]})
-        await stream.redis.zremrangebyrank(K_RECENT, 0, -stream.window - 1)
+        await stream.redis.zadd(stream.key(K_RECENT), {json.dumps(t): t["seq"]})
+        await stream.redis.zremrangebyrank(stream.key(K_RECENT), 0, -stream.window - 1)
     assert [t["content"] for t in await stream.recent()] == ["2", "3", "4"]
 
 
 async def test_cold_window_refills_from_postgres(stream):
     for i in range(5):
         await stream.append("a", "voice", str(i))
-    await stream.redis.delete(K_RECENT)
+    await stream.redis.delete(stream.key(K_RECENT))
     recent = await stream.recent()
     assert [t["content"] for t in recent] == ["0", "1", "2", "3", "4"]
-    assert await stream.redis.zcard(K_RECENT) == 5
+    assert await stream.redis.zcard(stream.key(K_RECENT)) == 5
 
 
 async def test_subscribe_sees_appends(stream):

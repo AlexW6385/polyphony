@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Drop a conscious thought into the mind.
+"""Drop a thought into the room as the person (or, with --world, as the world).
 
     python scripts/say.py "should I take the AI specialization?"
     python scripts/say.py --world --author news "Some headline"
@@ -20,7 +20,7 @@ def main() -> None:
     p.add_argument("--url", default=os.environ.get("POLYPHONY_URL", "http://localhost:8000"))
     a = p.parse_args()
 
-    body = {"content": " ".join(a.content), "kind": "world" if a.world else "conscious"}
+    body = {"content": " ".join(a.content), "kind": "world" if a.world else "person"}
     if a.world:
         body["author"] = a.author
     req = urllib.request.Request(

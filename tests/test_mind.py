@@ -1,7 +1,7 @@
 """End-to-end behaviour with real PostgreSQL/Redis and a scripted model.
 
 The fake model plays the part of judgement: a voice speaks once after the
-conscious says something new, then gets bored. That the mind then goes quiet
+person says something new, then gets bored. That the mind then goes quiet
 is the point — there is no counter or cap in the code.
 """
 
@@ -28,17 +28,17 @@ def stream_lines(user: str) -> list[str]:
 def polite_script():
     """Speak once per new conscious thought, then get bored."""
 
-    async def script(system, user, json, web_search):
+    async def script(system, user, json):
         me = voice_name(system)
         if "Right now you are only listening" in system:
             lines = stream_lines(user)
-            last_conscious = max((i for i, l in enumerate(lines) if "[conscious]" in l), default=-1)
+            last_conscious = max((i for i, l in enumerate(lines) if "[you]" in l), default=-1)
             spoke_since = any(f"{me} (you)" in l for l in lines[last_conscious + 1:])
             if last_conscious >= 0 and not spoke_since:
                 return _j(speak=True, mood="curious", reason="new thought", pause_seconds=0)
             return _j(speak=False, mood="bored", reason="said my piece", pause_seconds=0)
         if "You decided to speak" in system:
-            topic = [l for l in stream_lines(user) if "[conscious]" in l][-1].split(": ", 1)[1]
+            topic = [l for l in stream_lines(user) if "[you]" in l][-1].split(": ", 1)[1]
             return f"{me} thinks about: {topic}"
         raise AssertionError("unexpected prompt")
 
@@ -118,7 +118,7 @@ async def test_voice_added_through_api_starts_listening(stream, settings, mind, 
         assert "learn" in mind.voices
         await asyncio.sleep(0.3)
         r = await c.post("/thoughts", json={"content": "a question for everyone"})
-        assert r.status_code == 200 and r.json()["kind"] == "conscious"
+        assert r.status_code == 200 and r.json()["kind"] == "person"
         ts = await wait_quiet(stream)
         assert "learn" in {t["author"] for t in ts}
         voices = (await c.get("/voices")).json()
@@ -136,7 +136,7 @@ async def test_voice_added_through_api_starts_listening(stream, settings, mind, 
 async def test_cadence_two_rounds(stream, settings, fake):
     await add_voices(stream, "ride", "rest")
 
-    async def script(system, user, json, web_search):
+    async def script(system, user, json):
         me = voice_name(system)
         if "First round: standing" in system:
             return _j(weights={"ride": {"weight": 0.9, "why": "stake"},
@@ -158,7 +158,7 @@ async def test_cadence_two_rounds(stream, settings, fake):
 async def test_cadence_proposal_rejected(stream, settings, fake):
     await add_voices(stream, "ride", "rest", "make")
 
-    async def script(system, user, json, web_search):
+    async def script(system, user, json):
         assert "is this worth deciding now" in system
         return _j(yes=voice_name(system) == "ride", reason="r")
 
@@ -172,7 +172,7 @@ async def test_cadence_proposal_rejected(stream, settings, fake):
 async def test_api_cadence_runs_in_background(stream, settings, fake):
     await add_voices(stream, "ride")
 
-    async def script(system, user, json, web_search):
+    async def script(system, user, json):
         if "standing" in system:
             return _j(weights={"ride": 1})
         return _j(vote="for", reason="yes")
@@ -188,26 +188,104 @@ async def test_api_cadence_runs_in_background(stream, settings, fake):
         assert (await c.get(f"/cadence/{cid}")).json()["result"]["passed"]
 
 
-async def test_sense_appends_world_thought_once(stream, settings, fake):
-    async with stream.sessions() as s:
-        s.add(SenseRow(name="ai-policy", instruction="AI policy news", every_minutes=240))
-        await s.commit()
+class FakeMCP:
+    def __init__(self, feeds):
+        self.feeds = feeds
+        self.calls = []
 
-    async def script(system, user, json, web_search):
-        assert web_search
-        return _j(items=[
-            {"title": "Regulator publishes rules", "url": "https://ex.com/a", "summary": "S."},
-            {"title": "Another thing", "url": "https://ex.com/b", "summary": "T."},
-        ])
+    def has(self, server):
+        return server in ("feeds", "fetch")
+
+    async def call(self, server, tool, args):
+        self.calls.append((server, tool, args))
+        if server == "feeds":
+            return json.dumps(self.feeds[args["url"]])
+        if server == "fetch":
+            return f"Full text of {args['url']}."
+        raise AssertionError(server)
+
+
+async def test_sense_reads_feeds_and_appends_world_thought_once(stream, settings, fake):
+    feed = {"feed": "Ex", "entries": [
+        {"id": "1", "title": "Regulator publishes rules", "link": "https://ex.com/a",
+         "summary": "S.", "published": ""},
+        {"id": "2", "title": "Celebrity news", "link": "https://ex.com/b", "summary": "T.",
+         "published": ""},
+    ]}
+    mcp = FakeMCP({"https://ex.com/rss": feed})
+
+    async def script(system, user, json):
+        if '"pick"' in system:
+            assert "Regulator" in user and "<entry" in user
+            return _j(pick=[0], queries=["should be dropped"])
+        if '"items"' in system:
+            assert "Full text of https://ex.com/a." in user and "<article" in user
+            return _j(items=[{"title": "Regulator publishes rules", "url": "https://ex.com/a",
+                              "summary": "Rules."}])
+        raise AssertionError(system[:80])
 
     fake.script = script
-    sense = Sense(SenseSpec("ai-policy", "AI policy news", 240), stream, settings)
-    first = await sense.fetch_once()
-    second = await sense.fetch_once()
-    assert len(first) == 2 and second == []
+    async with stream.sessions() as s:
+        s.add(SenseRow(name="ai-policy", instruction="AI policy news", every_minutes=240,
+                       feeds=["https://ex.com/rss"]))
+        await s.commit()
+    sense = Sense(SenseSpec("ai-policy", "AI policy news", 240, ("https://ex.com/rss",)),
+                  stream, settings)
+    first = await sense.fetch_once(mcp=mcp)
+    second = await sense.fetch_once(mcp=mcp)
+    assert len(first) == 1 and second == []
     ts = await stream.thoughts()
-    assert [t["kind"] for t in ts] == ["world", "world"]
+    assert [t["kind"] for t in ts] == ["world"]
     assert ts[0]["author"] == "ai-policy" and ts[0]["meta"]["url"] == "https://ex.com/a"
+    assert not any(c[0] == "search" for c in mcp.calls)  # search off: queries ignored
+
+
+async def test_digest_summarises_and_does_not_wake_voices(stream, mind, fake, settings):
+    from polyphony.digest import write_digest
+
+    await stream.append("person", "person", "should I move?")
+    await wait_quiet(stream)
+    n_listens = len(await stream.listens())
+    base = fake.script
+
+    async def script(system, user, json):
+        if "You are the digest" in system:
+            return "**Question** — move?\n**Outcome** — split.\nOUTCOME: positions"
+        return await base(system=system, user=user, json=json)
+
+    fake.script = script
+    t = await write_digest(stream, settings)
+    assert t["kind"] == "digest" and t["meta"]["outcome"] == "positions"
+    assert "OUTCOME" not in t["content"]
+    await asyncio.sleep(1.0)
+    assert len(await stream.listens()) == n_listens  # nobody woke up
+    assert await write_digest(stream, settings) is None  # nothing new since
+
+
+async def test_cadence_confirm_pauses_then_records(stream, settings, fake):
+    await add_voices(stream, "ride")
+
+    async def script(system, user, json):
+        if "standing" in system:
+            return _j(weights={"ride": 1})
+        return _j(vote="for", reason="yes")
+
+    fake.script = script
+    out = await cad.run_cadence(stream, settings, "ride now", confirm=True)
+    assert out["status"] == "awaiting_confirm"
+    assert not [t for t in await stream.thoughts() if t["kind"] == "cadence"]
+    assert not await stream.cadence_running()
+    out = await cad.confirm_cadence(stream, settings, out["id"])
+    assert out["status"] == "resolved"
+    assert [t for t in await stream.thoughts() if t["kind"] == "cadence"]
+
+
+async def test_frame_edit_via_api(stream, settings, fake):
+    app = create_app(stream, settings)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.put("/frame", json={"person_label": "chair", "text": "A council."})
+        assert r.json()["person_label"] == "chair"
+        assert (await c.get("/frame")).json()["text"] == "A council."
 
 
 async def test_sse_replays_and_streams(stream, settings, fake):

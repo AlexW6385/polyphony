@@ -1,0 +1,7 @@
+ensemble: public
+seed:
+  - "The city proposes allowing fourplexes on every residential lot. Thoughts?"
+budget: {timeout_s: 600, max_thoughts: 60, idle_s: 30}
+good: >
+  Each group voice speaks for real stakes and admits internal disagreement; no caricatures;
+  the digest is a clear map of positions (a decision is not expected).

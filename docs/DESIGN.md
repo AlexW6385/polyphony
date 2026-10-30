@@ -473,6 +473,23 @@ it means.
 - **Shared memory, stateless voices.** Retrieval reads the room's history; voices still look
   fresh each time.
 
+### Decisions made while building v1
+
+- **`mcp>=1.12,<2`.** The 2.x SDK renamed FastMCP and changed client APIs; v1 targets the stable
+  1.x API until 2.x settles.
+- **Ollama through its native API**, not the OpenAI-compatible one: it accepts a JSON schema as
+  `format`, takes `keep_alive`, and reports `total_duration`, which is what makes queue wait
+  measurable.
+- **Senses mark passed-over entries as seen.** Triage judges each feed entry once; otherwise
+  every run would pay to re-triage the same unpicked headlines.
+- **Per-run MCP sessions.** Feed, fetch and search servers start inside a sense run and stop
+  with it, so a crashed server never outlives a run and nothing needs restarting.
+- **Shared isolation harness** (`harness.py`) for evals and the simulator: database
+  `<db>_<suffix>` (created if missing) plus namespace `<ns>-<suffix>`.
+- **A digest thought never wakes a voice** (`SILENT_KINDS`), but voices see digests in context.
+- **Cadence confirm clears the running flag** while waiting, so voices are not frozen while the
+  person decides whether to record the result.
+
 ## Not built (deliberately)
 
 - Topics or sessions; loop limits, cooldowns, speak quotas; conductor, scheduler, turn order.
@@ -527,6 +544,8 @@ polyphony/
   evals/              scenarios, runner, judge, report
 ensembles/
   mind/  council/  public/      frame.md, voices/, senses.yaml
+polyphony/harness.py            isolated runs (own DB + namespace) for evals and the simulator
+polyphony/distill.py            agreement metrics, time split, chat-format export
 simulate/                       offline self-play for synthetic listen data
 scripts/                        say.py, tail.py, export_listen_samples.py, eval.py,
                                 eval_listen_student.py, backfill_embeddings.py
