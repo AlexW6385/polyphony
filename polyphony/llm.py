@@ -1,8 +1,17 @@
 """Provider-agnostic LLM layer.
 
 One interface, `Provider.complete()`, hides the vendor. Tiers (listen, speak,
-sense) each pick a provider/model/base URL/key independently, and a voice may
-override either of its tiers in its front matter.
+sense, teacher) each pick a provider/model/base URL/key independently, and a
+voice may override its listen/speak tier in its front matter. Embeddings go
+through `Provider.embed()` where the vendor has one.
+
+Every call is traced: `set_tracer()` installs a callback that receives one
+`Trace` per call (main.py writes them to `llm_calls`).
+
+Structured output: `complete_json(schema=...)` passes the JSON schema to
+vendors that enforce it (OpenAI, Gemini, Ollama `format`); the reply is
+always run through `extract_json` as well, so a vendor without enforcement
+still works.
 """
 
 from __future__ import annotations
@@ -11,7 +20,9 @@ import asyncio
 import json
 import logging
 import os
-from collections.abc import Callable
+import time
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 from typing import Any, Protocol
 
 from .config import TierConfig
@@ -23,6 +34,34 @@ class LLMError(Exception):
     pass
 
 
+@dataclass
+class Completion:
+    """What a provider returns when it knows more than the text."""
+
+    text: str
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cached_input_tokens: int | None = None
+    server_ms: int | None = None  # time the server spent on the request (Ollama total_duration)
+
+
+@dataclass
+class Trace:
+    tier: str
+    provider: str
+    model: str
+    purpose: str
+    voice: str | None
+    latency_ms: int
+    queue_ms: int | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    cached_input_tokens: int | None = None
+    ok: bool = True
+    error: str | None = None
+    extra: dict[str, Any] = field(default_factory=dict)
+
+
 class Provider(Protocol):
     async def complete(
         self,
@@ -31,47 +70,26 @@ class Provider(Protocol):
         system: str,
         user: str,
         json: bool = False,
+        schema: dict[str, Any] | None = None,
         temperature: float = 0.8,
         max_tokens: int = 1024,
-        web_search: bool = False,
-    ) -> str: ...
+    ) -> str | Completion: ...
 
 
 # --------------------------------------------------------------------------- OpenAI-compatible
 
 
 class OpenAIProvider:
-    """OpenAI, and anything that speaks its API (DeepSeek, Ollama, vLLM, ...)."""
+    """OpenAI, and anything that speaks its API (DeepSeek, vLLM, ...)."""
 
     def __init__(self, base_url: str | None, api_key: str | None, *, official: bool = True):
         from openai import AsyncOpenAI
 
         self.client = AsyncOpenAI(base_url=base_url, api_key=api_key)
-        self.official = official  # only api.openai.com has the Responses web_search tool
+        self.official = official
 
-    async def complete(
-        self,
-        *,
-        model,
-        system,
-        user,
-        json=False,
-        temperature=0.8,
-        max_tokens=1024,
-        web_search=False,
-    ) -> str:
-        if web_search:
-            if not self.official:
-                raise LLMError("this OpenAI-compatible endpoint has no web search")
-            resp = await self.client.responses.create(
-                model=model,
-                instructions=system,
-                input=user,
-                tools=[{"type": "web_search"}],
-                max_output_tokens=max_tokens,
-            )
-            return resp.output_text or ""
-
+    async def complete(self, *, model, system, user, json=False, schema=None, temperature=0.8,
+                       max_tokens=1024) -> Completion:
         kwargs: dict[str, Any] = {
             "model": model,
             "messages": [
@@ -84,7 +102,12 @@ class OpenAIProvider:
             kwargs["max_completion_tokens"] = max_tokens
         else:
             kwargs["max_tokens"] = max_tokens
-        if json:
+        if schema and self.official:
+            kwargs["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {"name": "reply", "schema": _strict(schema), "strict": True},
+            }
+        elif json or schema:
             kwargs["response_format"] = {"type": "json_object"}
         try:
             resp = await self.client.chat.completions.create(**kwargs)
@@ -95,7 +118,93 @@ class OpenAIProvider:
                 resp = await self.client.chat.completions.create(**kwargs)
             else:
                 raise
-        return resp.choices[0].message.content or ""
+        u = getattr(resp, "usage", None)
+        cached = None
+        if u is not None and getattr(u, "prompt_tokens_details", None) is not None:
+            cached = getattr(u.prompt_tokens_details, "cached_tokens", None)
+        return Completion(
+            text=resp.choices[0].message.content or "",
+            input_tokens=getattr(u, "prompt_tokens", None),
+            output_tokens=getattr(u, "completion_tokens", None),
+            cached_input_tokens=cached,
+        )
+
+    async def embed(self, *, model: str, texts: list[str]) -> list[list[float]]:
+        resp = await self.client.embeddings.create(model=model, input=texts)
+        return [d.embedding for d in resp.data]
+
+
+def _strict(schema: dict[str, Any]) -> dict[str, Any]:
+    """OpenAI strict mode wants additionalProperties: false on every object."""
+    s = dict(schema)
+    if s.get("type") == "object":
+        s.setdefault("additionalProperties", False)
+        s["properties"] = {k: _strict(v) for k, v in s.get("properties", {}).items()}
+    if "items" in s and isinstance(s["items"], dict):
+        s["items"] = _strict(s["items"])
+    return s
+
+
+# --------------------------------------------------------------------------- Ollama (native API)
+
+
+class OllamaProvider:
+    """Ollama's native API: structured `format`, `keep_alive`, and server-side timings.
+
+    The native API reports `total_duration` (time the server spent on the
+    request); client latency minus that is time spent queued, which is what
+    `OLLAMA_NUM_PARALLEL` controls.
+    """
+
+    def __init__(self, base_url: str | None):
+        import httpx
+
+        base = base_url or os.environ.get("OLLAMA_BASE_URL") or "http://localhost:11434"
+        self.base = base.rstrip("/").removesuffix("/v1")
+        self.client = httpx.AsyncClient(base_url=self.base, timeout=300)
+        self.keep_alive = os.environ.get("OLLAMA_KEEP_ALIVE", "30m")
+
+    async def _post(self, path: str, body: dict[str, Any]) -> dict[str, Any]:
+        import httpx
+
+        try:
+            r = await self.client.post(path, json=body)
+        except httpx.ConnectError as e:
+            raise LLMError(
+                f"Ollama is not reachable at {self.base} — start Ollama or set LISTEN_BASE_URL / "
+                f"EMBED_BASE_URL / OLLAMA_BASE_URL (on macOS in Docker: "
+                f"http://host.docker.internal:11434). Polyphony never falls back to a paid tier."
+            ) from e
+        if r.status_code >= 400:
+            raise LLMError(f"Ollama {path} {r.status_code}: {r.text[:300]}")
+        return r.json()
+
+    async def complete(self, *, model, system, user, json=False, schema=None, temperature=0.8,
+                       max_tokens=1024) -> Completion:
+        body: dict[str, Any] = {
+            "model": model,
+            "messages": [{"role": "system", "content": system},
+                         {"role": "user", "content": user}],
+            "stream": False,
+            "keep_alive": self.keep_alive,
+            "options": {"temperature": temperature, "num_predict": max_tokens},
+        }
+        if schema:
+            body["format"] = schema
+        elif json:
+            body["format"] = "json"
+        d = await self._post("/api/chat", body)
+        return Completion(
+            text=(d.get("message") or {}).get("content", ""),
+            input_tokens=d.get("prompt_eval_count"),
+            output_tokens=d.get("eval_count"),
+            server_ms=int(d["total_duration"] / 1e6) if d.get("total_duration") else None,
+        )
+
+    async def embed(self, *, model: str, texts: list[str]) -> list[list[float]]:
+        d = await self._post("/api/embed", {"model": model, "input": texts,
+                                            "keep_alive": self.keep_alive})
+        return d["embeddings"]
 
 
 # --------------------------------------------------------------------------- Anthropic
@@ -107,31 +216,24 @@ class AnthropicProvider:
 
         self.client = AsyncAnthropic(base_url=base_url, api_key=api_key)
 
-    async def complete(
-        self,
-        *,
-        model,
-        system,
-        user,
-        json=False,
-        temperature=0.8,
-        max_tokens=1024,
-        web_search=False,
-    ) -> str:
-        # `temperature` is deliberately not sent: current Claude models and SDKs
-        # no longer take it, and the default sampling is fine for voices.
-        kwargs: dict[str, Any] = {
-            "model": model,
-            "system": system,  # system prompt goes here, not in messages
-            "messages": [{"role": "user", "content": user}],
-            "max_tokens": max_tokens,
-        }
-        if web_search:
-            kwargs["tools"] = [{"type": "web_search_20250305", "name": "web_search", "max_uses": 5}]
-        resp = await self.client.messages.create(**kwargs)
-        texts = [b.text for b in resp.content if getattr(b, "type", None) == "text"]
-        # With tools, the model's final answer is the last text block.
-        return texts[-1] if web_search and texts else "".join(texts)
+    async def complete(self, *, model, system, user, json=False, schema=None, temperature=0.8,
+                       max_tokens=1024) -> Completion:
+        # The system prompt is frame + engine (+ voice): mark it cacheable so the shared
+        # prefix is billed once. Temperature is not sent; default sampling is fine.
+        resp = await self.client.messages.create(
+            model=model,
+            system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
+            messages=[{"role": "user", "content": user}],
+            max_tokens=max_tokens,
+        )
+        u = resp.usage
+        return Completion(
+            text="".join(b.text for b in resp.content if getattr(b, "type", None) == "text"),
+            input_tokens=(u.input_tokens or 0) + (getattr(u, "cache_read_input_tokens", 0) or 0)
+            + (getattr(u, "cache_creation_input_tokens", 0) or 0),
+            output_tokens=u.output_tokens,
+            cached_input_tokens=getattr(u, "cache_read_input_tokens", None),
+        )
 
 
 # --------------------------------------------------------------------------- Gemini
@@ -147,17 +249,8 @@ class GeminiProvider:
             http_options=http_options,
         )
 
-    async def complete(
-        self,
-        *,
-        model,
-        system,
-        user,
-        json=False,
-        temperature=0.8,
-        max_tokens=1024,
-        web_search=False,
-    ) -> str:
+    async def complete(self, *, model, system, user, json=False, schema=None, temperature=0.8,
+                       max_tokens=1024) -> Completion:
         from google.genai import types
 
         cfg: dict[str, Any] = {
@@ -165,14 +258,24 @@ class GeminiProvider:
             "temperature": temperature,
             "max_output_tokens": max_tokens,
         }
-        if web_search:
-            cfg["tools"] = [types.Tool(google_search=types.GoogleSearch())]
-        elif json:
+        if json or schema:
             cfg["response_mime_type"] = "application/json"
+        if schema:
+            cfg["response_json_schema"] = schema
         resp = await self.client.aio.models.generate_content(
             model=model, contents=user, config=types.GenerateContentConfig(**cfg)
         )
-        return resp.text or ""
+        u = getattr(resp, "usage_metadata", None)
+        return Completion(
+            text=resp.text or "",
+            input_tokens=getattr(u, "prompt_token_count", None),
+            output_tokens=getattr(u, "candidates_token_count", None),
+            cached_input_tokens=getattr(u, "cached_content_token_count", None),
+        )
+
+    async def embed(self, *, model: str, texts: list[str]) -> list[list[float]]:
+        resp = await self.client.aio.models.embed_content(model=model, contents=texts)
+        return [e.values for e in resp.embeddings]
 
 
 # --------------------------------------------------------------------------- registry
@@ -193,8 +296,7 @@ def _deepseek(base_url, api_key):
 
 
 def _ollama(base_url, api_key):
-    base = base_url or os.environ.get("OLLAMA_BASE_URL") or "http://localhost:11434/v1"
-    return OpenAIProvider(base, api_key or "ollama", official=False)
+    return OllamaProvider(base_url)
 
 
 def _anthropic(base_url, api_key):
@@ -252,6 +354,29 @@ def resolve_tier(base: TierConfig, override: dict[str, Any] | None) -> TierConfi
     )
 
 
+# --------------------------------------------------------------------------- tracing
+
+Tracer = Callable[[Trace], Awaitable[None]]
+_tracer: Tracer | None = None
+_trace_tasks: set[asyncio.Task] = set()
+
+
+def set_tracer(fn: Tracer | None) -> None:
+    global _tracer
+    _tracer = fn
+
+
+def _emit(trace: Trace) -> None:
+    if _tracer is None:
+        return
+    try:
+        t = asyncio.get_running_loop().create_task(_tracer(trace))
+    except RuntimeError:
+        return
+    _trace_tasks.add(t)
+    t.add_done_callback(_trace_tasks.discard)
+
+
 # --------------------------------------------------------------------------- helpers
 
 
@@ -263,16 +388,34 @@ def _transient(e: Exception) -> bool:
     return any(s in name for s in ("Connection", "Timeout", "ServerError", "Overloaded"))
 
 
-async def _call(tier: TierConfig, **kw) -> str:
+async def _once(tier: TierConfig, tier_name: str, purpose: str, voice: str | None,
+                **kw) -> str:
     provider = get_provider(tier)
+    start = time.perf_counter()
     try:
-        return await provider.complete(model=tier.model, **kw)
+        out = await provider.complete(model=tier.model, **kw)
+    except Exception as e:
+        _emit(Trace(tier_name, tier.provider, tier.model, purpose, voice,
+                    int((time.perf_counter() - start) * 1000), ok=False, error=str(e)[:500]))
+        raise
+    latency = int((time.perf_counter() - start) * 1000)
+    c = out if isinstance(out, Completion) else Completion(text=out)
+    queue = max(0, latency - c.server_ms) if c.server_ms is not None else None
+    _emit(Trace(tier_name, tier.provider, tier.model, purpose, voice, latency, queue,
+                c.input_tokens, c.output_tokens, c.cached_input_tokens))
+    return c.text
+
+
+async def _call(tier: TierConfig, *, tier_name: str = "?", purpose: str = "?",
+                voice: str | None = None, **kw) -> str:
+    try:
+        return await _once(tier, tier_name, purpose, voice, **kw)
     except Exception as e:
         if not _transient(e):
             raise
         log.warning("transient LLM error (%s), retrying once: %s", tier.provider, e)
         await asyncio.sleep(1.5)
-        return await provider.complete(model=tier.model, **kw)
+        return await _once(tier, tier_name, purpose, voice, **kw)
 
 
 def extract_json(text: str) -> dict[str, Any]:
@@ -308,26 +451,37 @@ def extract_json(text: str) -> dict[str, Any]:
 
 
 async def complete_json(
-    tier: TierConfig, system: str, user: str, *, temperature: float = 0.7, max_tokens: int = 600
+    tier: TierConfig, system: str, user: str, *, temperature: float = 0.7, max_tokens: int = 600,
+    schema: dict[str, Any] | None = None, tier_name: str = "?", purpose: str = "?",
+    voice: str | None = None,
 ) -> dict[str, Any]:
-    text = await _call(
-        tier, system=system, user=user, json=True, temperature=temperature, max_tokens=max_tokens
-    )
+    text = await _call(tier, tier_name=tier_name, purpose=purpose, voice=voice, system=system,
+                       user=user, json=True, schema=schema, temperature=temperature,
+                       max_tokens=max_tokens)
     return extract_json(text)
 
 
 async def complete_text(
-    tier: TierConfig, system: str, user: str, *, temperature: float = 0.9, max_tokens: int = 1024
+    tier: TierConfig, system: str, user: str, *, temperature: float = 0.9, max_tokens: int = 1024,
+    tier_name: str = "?", purpose: str = "?", voice: str | None = None,
 ) -> str:
-    text = await _call(tier, system=system, user=user, temperature=temperature, max_tokens=max_tokens)
+    text = await _call(tier, tier_name=tier_name, purpose=purpose, voice=voice, system=system,
+                       user=user, temperature=temperature, max_tokens=max_tokens)
     return text.strip()
 
 
-async def search_json(
-    tier: TierConfig, system: str, user: str, *, max_tokens: int = 2000
-) -> dict[str, Any]:
-    """Ask a model with web search for a JSON object (used by senses)."""
-    text = await _call(
-        tier, system=system, user=user, web_search=True, temperature=0.3, max_tokens=max_tokens
-    )
-    return extract_json(text)
+async def embed(tier: TierConfig, texts: list[str]) -> list[list[float]]:
+    provider = get_provider(tier)
+    fn = getattr(provider, "embed", None)
+    if fn is None:
+        raise LLMError(f"provider {tier.provider!r} has no embeddings")
+    start = time.perf_counter()
+    try:
+        out = await fn(model=tier.model, texts=texts)
+    except Exception as e:
+        _emit(Trace("embed", tier.provider, tier.model, "embed", None,
+                    int((time.perf_counter() - start) * 1000), ok=False, error=str(e)[:500]))
+        raise
+    _emit(Trace("embed", tier.provider, tier.model, "embed", None,
+                int((time.perf_counter() - start) * 1000)))
+    return out
