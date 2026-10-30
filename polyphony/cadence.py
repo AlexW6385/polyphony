@@ -1,10 +1,14 @@
 """Cadence: an explicit, optional decision procedure.
 
     propose (by a voice) -> yes/no "worth deciding now?" among all voices, simple majority
-    start (by the conscious, or a passed proposal):
+    start (by the person, or a passed proposal):
         round 1 standing: every voice weights every voice; averaged, normalised
         round 2 vote:     for | against | abstain, weighted
     -> a `cadence` thought in the stream with the full result
+
+The procedure itself runs as a LangGraph workflow (cadence_graph.py) with a
+checkpointer, so an interrupted cadence resumes from its last finished step.
+This module holds the API surface, the proposal vote and the pure math.
 """
 
 from __future__ import annotations
@@ -18,29 +22,32 @@ from . import llm, prompts
 from .config import Settings
 from .db import Cadence
 from .stream import Stream
+from .frame import Frame, get_frame
 from .voice import VoiceSpec, load_voice_specs
 
 log = logging.getLogger(__name__)
 
 
-async def _context(stream: Stream, settings: Settings, me: str) -> str:
+async def _context(stream: Stream, frame: Frame, me: str) -> str:
     recent = await stream.recent()
-    return prompts.render(recent, [], await stream.listens_latest(), await stream.forming(), me)
+    return prompts.render(recent, [], await stream.listens_latest(), await stream.forming(), me,
+                          person_label=frame.person_label)
 
 
-async def _ask(stream: Stream, settings: Settings, spec: VoiceSpec, tier_name: str,
-               system: str) -> dict[str, Any] | None:
+async def ask(stream: Stream, settings: Settings, frame: Frame, spec: VoiceSpec, tier_name: str,
+              system: str, purpose: str) -> dict[str, Any] | None:
     base = settings.listen_tier if tier_name == "listen" else settings.speak_tier
     tier = llm.resolve_tier(base, spec.overrides.get(tier_name))
     try:
-        return await llm.complete_json(tier, system, await _context(stream, settings, spec.name),
-                                       temperature=0.5)
+        return await llm.complete_json(tier, system, await _context(stream, frame, spec.name),
+                                       temperature=0.5, tier_name=tier_name, purpose=purpose,
+                                       voice=spec.name)
     except Exception:
         log.exception("cadence: %s did not answer", spec.name)
         return None
 
 
-async def _set(stream: Stream, cadence_id: int, **fields) -> None:
+async def set_fields(stream: Stream, cadence_id: int, **fields) -> None:
     async with stream.sessions() as s:
         row = await s.get(Cadence, cadence_id)
         for k, v in fields.items():
@@ -139,57 +146,28 @@ def summarize(resolution: str, proposed_by: str, weights: dict[str, float],
 
 
 async def run_cadence(stream: Stream, settings: Settings, resolution: str,
-                      proposed_by: str = "conscious", cadence_id: int | None = None,
-                      proposal: dict[str, Any] | None = None) -> dict:
-    """Run both rounds and append the result. Returns the cadence row as a dict."""
+                      proposed_by: str = "person", cadence_id: int | None = None,
+                      proposal: dict[str, Any] | None = None, confirm: bool = False) -> dict:
+    """Run both rounds through the workflow and record the result.
+
+    With `confirm=True` the workflow pauses before recording (status
+    `awaiting_confirm`); `confirm_cadence()` resumes it.
+    """
+    from . import cadence_graph
+
     if cadence_id is None:
         cadence_id = await create_cadence(stream, resolution, proposed_by, "running")
     else:
-        await _set(stream, cadence_id, status="running")
+        await set_fields(stream, cadence_id, status="running")
+    await cadence_graph.start(stream, settings, cadence_id, resolution, proposed_by,
+                              proposal=proposal, confirm=confirm)
+    return await get_cadence(stream, cadence_id)
 
-    await stream.set_cadence_running(cadence_id, True)
-    try:
-        specs = await load_voice_specs(stream.sessions, settings)
-        names = [s.name for s in specs]
-        if not specs:
-            result = {"for": 0, "against": 0, "abstain": 0, "share_for": None, "passed": False}
-            await _set(stream, cadence_id, status="resolved", weights={}, votes={}, result=result,
-                       resolved_at=datetime.now(timezone.utc))
-            return await get_cadence(stream, cadence_id)
 
-        # Round 1: standing.
-        proposals = await asyncio.gather(*[
-            _ask(stream, settings, s, "speak",
-                 prompts.standing_system(s.name, s.text, resolution, names))
-            for s in specs
-        ])
-        weights = average_weights(names, list(proposals))
-        await _set(stream, cadence_id, weights={
-            "final": weights,
-            "proposals": {s.name: p for s, p in zip(specs, proposals)},
-        })
+async def confirm_cadence(stream: Stream, settings: Settings, cadence_id: int) -> dict | None:
+    from . import cadence_graph
 
-        # Round 2: vote.
-        raw_votes = await asyncio.gather(*[
-            _ask(stream, settings, s, "speak",
-                 prompts.vote_system(s.name, s.text, resolution, weights))
-            for s in specs
-        ])
-        votes = {s.name: _normalize_vote(v) for s, v in zip(specs, raw_votes)}
-        result = tally(weights, votes)
-        if proposal is not None:
-            result["proposal"] = proposal
-
-        content = summarize(resolution, proposed_by, weights, votes, result)
-        meta = {"cadence_id": cadence_id, "resolution": resolution, "proposed_by": proposed_by,
-                "weights": weights, "votes": votes, "result": result}
-        await _set(stream, cadence_id, votes=votes, result=result, status="resolved",
-                   resolved_at=datetime.now(timezone.utc))
-    finally:
-        await stream.set_cadence_running(cadence_id, False)
-
-    # Appended after the running flag is cleared, so this thought wakes the voices.
-    await stream.append("cadence", "cadence", content, meta=meta)
+    await cadence_graph.resume(stream, settings, cadence_id, confirmed=True)
     return await get_cadence(stream, cadence_id)
 
 
@@ -200,10 +178,11 @@ async def propose_cadence(stream: Stream, settings: Settings, proposer: str,
     await stream.append(proposer, "voice", f"I think we should decide this: {resolution}",
                         mood="proposing", meta={"proposes_cadence": cadence_id})
 
+    frame = await get_frame(stream.sessions, settings.ensemble)
     specs = await load_voice_specs(stream.sessions, settings)
     answers = await asyncio.gather(*[
-        _ask(stream, settings, s, "listen",
-             prompts.proposal_system(s.name, s.text, proposer, resolution))
+        ask(stream, settings, frame, s, "listen",
+            prompts.proposal_system(frame, s.name, s.text, proposer, resolution), "proposal")
         for s in specs
     ])
     ballots = {}
@@ -214,7 +193,7 @@ async def propose_cadence(stream: Stream, settings: Settings, proposer: str,
     passed = yes_count > len(specs) / 2
 
     if not passed:
-        await _set(stream, cadence_id, status="rejected",
+        await set_fields(stream, cadence_id, status="rejected",
                    result={"passed": False, "proposal": ballots},
                    resolved_at=datetime.now(timezone.utc))
         await stream.append(

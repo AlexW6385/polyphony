@@ -7,14 +7,14 @@
 <style>
   :root {
     --bg: #f6f4ef; --panel: #fffdf8; --ink: #22201c; --muted: #7a756b; --line: #e3ddd0;
-    --accent: #3b5bdb; --conscious: #b8860b; --world: #2b8a3e; --cadence: #862e9c;
+    --accent: #3b5bdb; --conscious: #b8860b; --world: #2b8a3e; --cadence: #862e9c; --digest: #0b7285;
     --quiet: #adb5bd; --speak: #3b5bdb;
     --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   }
   @media (prefers-color-scheme: dark) {
     :root { --bg: #16161a; --panel: #1e1e23; --ink: #e9e6df; --muted: #8e8a82; --line: #2e2e35;
-            --accent: #748ffc; --conscious: #f2c94c; --world: #69db7c; --cadence: #da77f2;
+            --accent: #748ffc; --conscious: #f2c94c; --world: #69db7c; --cadence: #da77f2; --digest: #66d9e8;
             --quiet: #5c636a; --speak: #748ffc; }
   }
   * { box-sizing: border-box; }
@@ -55,8 +55,14 @@
   .thought .meta { font-size: 12px; color: var(--muted); display: flex; gap: 8px; }
   .thought .who { font-weight: 600; color: var(--ink); }
   .thought .body { white-space: pre-wrap; margin-top: 2px; }
-  .thought.conscious .who { color: var(--conscious); }
-  .thought.conscious .body { font-weight: 500; }
+  .thought.person .who { color: var(--conscious); }
+  .thought.person .body { font-weight: 500; }
+  .thought.digest { border: 1px solid var(--digest); border-radius: 8px; padding: 10px 12px;
+                    margin: 10px 0; background: var(--panel); }
+  .thought.digest .who { color: var(--digest); }
+  .memories { margin-top: 6px; padding-left: 10px; border-left: 2px solid var(--line);
+              font-size: 12px; color: var(--muted); white-space: pre-wrap; }
+  .stats td { padding: 2px 4px; font-size: 12px; border-top: 1px solid var(--line); }
   .thought.world .who { color: var(--world); }
   .thought.world a { color: var(--world); }
   .thought.cadence { border: 1px solid var(--cadence); border-radius: 8px; padding: 10px 12px;
@@ -84,6 +90,7 @@
 <body>
 <header>
   <h1>Polyphony</h1><span class="tag">many voices, no conductor</span>
+  <span class="small" id="frame-label"></span>
   <span class="status" id="status">connecting…</span>
 </header>
 <main>
@@ -91,7 +98,7 @@
     <div class="block">
       <h2>Think</h2>
       <form id="think-form">
-        <textarea id="think" placeholder="Drop a conscious thought into the mind…"></textarea>
+        <textarea id="think" placeholder="Drop a thought into the room…"></textarea>
         <div class="row"><button class="primary">Think</button>
           <span class="small">⌘/Ctrl+Enter</span></div>
       </form>
@@ -100,8 +107,26 @@
       <h2>Decide</h2>
       <form id="decide-form">
         <input id="resolution" placeholder="A resolution to vote on">
-        <div class="row"><button class="primary">Start cadence</button></div>
+        <div class="row"><button class="primary">Start cadence</button>
+          <label class="small"><input type="checkbox" id="confirm-first" style="width:auto">
+            confirm before recording</label></div>
       </form>
+      <div id="awaiting"></div>
+      <div class="row"><button id="digest-now">Digest now</button>
+        <label class="small"><input type="checkbox" id="debug" style="width:auto"> debug: memories</label></div>
+    </div>
+    <div class="block">
+      <h2>Frame</h2>
+      <details>
+        <summary>What this polyphony is</summary>
+        <form id="frame-form">
+          <div class="row"><input id="frame-label-in" placeholder="label" class="mono">
+            <input id="frame-person" placeholder="human's label" class="mono"></div>
+          <textarea id="frame-text" rows="9"></textarea>
+          <div class="row"><button class="primary">Save frame</button>
+            <span class="small">voices restart with it</span></div>
+        </form>
+      </details>
     </div>
     <div class="block">
       <h2>Voices</h2>
@@ -124,6 +149,9 @@
         <form id="sense-form">
           <input id="sense-name" placeholder="name (e.g. coop-hiring)" class="mono">
           <textarea id="sense-instruction" rows="3" placeholder="What to look for in the world"></textarea>
+          <textarea id="sense-feeds" rows="3" class="mono" placeholder="RSS/Atom feed URLs, one per line"></textarea>
+          <label class="small"><input type="checkbox" id="sense-search" style="width:auto">
+            allow web search (needs EXA_API_KEY or TAVILY_API_KEY)</label>
           <div class="row"><span class="small">every</span>
             <input id="sense-every" type="number" min="30" value="240" style="width:90px">
             <span class="small">min</span><button class="primary">Add sense</button></div>
@@ -132,11 +160,13 @@
     </div>
   </section>
 
-  <section><div id="stream"><p class="empty" id="empty">The mind is quiet. Think something.</p></div></section>
+  <section><div id="stream"><p class="empty" id="empty">The room is quiet. Think something.</p></div></section>
 
   <section>
     <h2>Listening</h2>
     <div id="listens"></div>
+    <h2 style="margin-top:18px">Stats (24 h)</h2>
+    <div id="stats" class="small">…</div>
   </section>
 </main>
 
@@ -184,7 +214,8 @@ function addThought(t) {
   const kindTag = t.kind === "voice" ? "" : `<span>[${t.kind}]</span>`;
   div.innerHTML = `<div class="meta"><span>#${t.seq}</span><span class="who">${esc(t.author)}</span>
       ${kindTag}${t.mood ? `<span>(${esc(t.mood)})</span>` : ""}<span>${time(t.created_at)}</span>${url}</div>` +
-    (t.kind === "cadence" ? cadenceHtml(t) : `<div class="body">${esc(t.content)}</div>`);
+    (t.kind === "cadence" ? cadenceHtml(t) : `<div class="body">${esc(t.content)}</div>`) +
+    (t.kind === "digest" && t.meta ? `<div class="small">#${t.meta.from_seq}–#${t.meta.to_seq} · outcome: ${esc(t.meta.outcome)}</div>` : "");
   // keep order of record even if events arrive out of order
   const stream = $("#stream");
   const after = [...stream.children].find(c => +c.dataset.seq > t.seq);
@@ -280,8 +311,9 @@ async function refreshSenses() {
   const senses = await api("GET", "/senses");
   $("#senses").innerHTML = senses.map(s => `
     <div class="item ${s.enabled ? "" : "off"}" data-name="${esc(s.name)}">
-      <span class="name">${esc(s.name)}</span> <span class="small">every ${s.every_minutes} min${s.last_run ? " · last " + time(s.last_run) : ""}</span>
+      <span class="name">${esc(s.name)}</span> <span class="small">every ${s.every_minutes} min${s.last_run ? " · last " + time(s.last_run) : ""}${s.search ? " · search" : ""}</span>
       <div class="small">${esc(s.instruction)}</div>
+      <div class="small mono">${(s.feeds || []).map(esc).join("<br>") || "no feeds"}</div>
       <div class="actions">
         <button data-act="toggle" data-on="${s.enabled}">${s.enabled ? "Disable" : "Enable"}</button>
         <button data-act="delete">Delete</button>
@@ -300,7 +332,9 @@ $("#senses").addEventListener("click", async (e) => {
 $("#sense-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   await api("POST", "/senses", {name: $("#sense-name").value.trim(),
-    instruction: $("#sense-instruction").value, every_minutes: +$("#sense-every").value || 240});
+    instruction: $("#sense-instruction").value, every_minutes: +$("#sense-every").value || 240,
+    feeds: $("#sense-feeds").value.split("\n").map(x => x.trim()).filter(Boolean),
+    search: $("#sense-search").checked});
   e.target.reset(); refreshSenses();
 });
 
@@ -316,16 +350,72 @@ $("#think").addEventListener("keydown", (e) => {
 $("#decide-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   const resolution = $("#resolution").value.trim(); if (!resolution) return;
-  await api("POST", "/cadence", {resolution}); $("#resolution").value = "";
+  const c = await api("POST", "/cadence", {resolution, confirm: $("#confirm-first").checked});
+  $("#resolution").value = "";
+  if ($("#confirm-first").checked) { awaiting.add(c.id); pollAwaiting(); }
 });
+
+// ---------------------------------------------------------------- confirm, digest, frame, stats
+const awaiting = new Set();
+async function pollAwaiting() {
+  const parts = [];
+  for (const id of [...awaiting]) {
+    const c = await api("GET", `/cadence/${id}`);
+    if (c.status === "resolved") { awaiting.delete(id); continue; }
+    const r = c.result || {};
+    parts.push(`<div class="item"><b>Cadence #${id}</b> <span class="small">${esc(c.status)}</span>
+      <div class="small">“${esc(c.resolution)}”${c.status === "awaiting_confirm" ? ` — ${r.passed ? "would pass" : "would not pass"}` : ""}</div>
+      ${c.status === "awaiting_confirm" ? `<div class="actions"><button data-confirm="${id}" class="primary">Record result</button></div>` : ""}</div>`);
+  }
+  $("#awaiting").innerHTML = parts.join("");
+  if (awaiting.size) setTimeout(pollAwaiting, 2000);
+}
+$("#awaiting").addEventListener("click", async (e) => {
+  const id = e.target.dataset.confirm; if (!id) return;
+  await api("POST", `/cadence/${id}/confirm`); pollAwaiting();
+});
+$("#digest-now").addEventListener("click", async () => {
+  const r = await fetch("/digest", {method: "POST"});
+  if (r.status === 409) alert("Nothing new to digest.");
+});
+$("#stream").addEventListener("click", async (e) => {
+  if (!$("#debug").checked) return;
+  const el = e.target.closest(".thought"); if (!el || el.querySelector(".memories")) return;
+  const r = await fetch(`/memories?seq=${el.dataset.seq}`);
+  const box = document.createElement("div"); box.className = "memories";
+  box.textContent = r.ok ? ((await r.json()).map(m => `#${m.seq} ${m.author} (${m.distance}): ${m.content.slice(0, 160)}`).join("\n") || "(no memories)") : await r.text();
+  el.appendChild(box);
+});
+async function loadFrame() {
+  const f = await api("GET", "/frame");
+  $("#frame-label").textContent = `· ${f.label}`;
+  $("#frame-label-in").value = f.label; $("#frame-person").value = f.person_label;
+  $("#frame-text").value = f.text;
+}
+$("#frame-form").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  await api("PUT", "/frame", {label: $("#frame-label-in").value, person_label: $("#frame-person").value,
+                              text: $("#frame-text").value});
+  loadFrame();
+});
+async function refreshStats() {
+  let s; try { s = await api("GET", "/stats?hours=24"); } catch { return; }
+  const rows = s.tiers.map(t => `<tr><td>${esc(t.tier)}</td><td class="mono">${esc(t.model)}</td>
+    <td>${t.calls}</td><td>${t.latency_ms_p95} ms</td><td>${t.queue_ms_p95 ?? "–"}</td>
+    <td>${t.input_tokens + t.output_tokens}</td></tr>`).join("");
+  const a = s.student_teacher;
+  $("#stats").innerHTML = `<table class="stats"><tr><td>tier</td><td>model</td><td>calls</td><td>p95</td><td>queue p95</td><td>tokens</td></tr>${rows}</table>
+    <div style="margin-top:6px">student–teacher agreement: ${a.n ? `${a.accuracy} (n=${a.n}, recall speak ${a.recall_speak ?? "–"})` : "no samples yet"}</div>`;
+}
 
 // ---------------------------------------------------------------- boot
 (async () => {
   await loadHistory();
   connect();
-  refreshVoices(); refreshSenses();
+  refreshVoices(); refreshSenses(); loadFrame(); refreshStats();
   setInterval(refreshVoices, 3000);
   setInterval(refreshSenses, 30000);
+  setInterval(refreshStats, 15000);
 })();
 </script>
 </body>

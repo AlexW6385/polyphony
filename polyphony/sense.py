@@ -1,14 +1,17 @@
-"""A sense: a standing instruction for what to bring in from the outside world.
+"""A sense: a standing instruction plus the feeds the person chose.
 
-On a schedule, a sense asks a model with web search to fetch and summarize,
-then drops each new item into the stream as a `world` thought. Items already
-seen (by URL or by title) are never appended twice.
+On a schedule, a sense runs one workflow (sense_graph.py): read the feeds over
+MCP, let the model pick what matters, read the articles, summarise, and drop
+each new item into the stream as a `world` thought. Items already seen (by URL
+or by title) are never appended twice. Works with any provider: nothing here
+depends on a vendor's built-in web search.
 """
 
 from __future__ import annotations
 
 import asyncio
 import hashlib
+import json
 import logging
 import re
 from dataclasses import dataclass
@@ -18,7 +21,6 @@ from typing import Any
 from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert
 
-from . import llm, prompts
 from .config import Settings
 from .db import SenseLog, SenseRow
 from .stream import Stream
@@ -34,13 +36,17 @@ class SenseSpec:
     name: str
     instruction: str
     every_minutes: int
+    feeds: tuple[str, ...] = ()
+    search: bool = False
 
     @classmethod
     def from_row(cls, row: SenseRow) -> SenseSpec:
-        return cls(row.name, row.instruction, max(MIN_EVERY_MINUTES, row.every_minutes))
+        return cls(row.name, row.instruction, max(MIN_EVERY_MINUTES, row.every_minutes),
+                   tuple(row.feeds or ()), bool(row.search))
 
     def fingerprint(self) -> str:
-        return hashlib.sha256(f"{self.instruction}\0{self.every_minutes}".encode()).hexdigest()
+        blob = json.dumps([self.instruction, self.every_minutes, list(self.feeds), self.search])
+        return hashlib.sha256(blob.encode()).hexdigest()
 
 
 def fingerprints(item: dict[str, Any]) -> list[str]:
@@ -94,37 +100,63 @@ class Sense:
                             .values(last_run=datetime.now(timezone.utc)))
             await s.commit()
 
-    async def fetch_once(self) -> list[dict[str, Any]]:
-        """Fetch, dedup, append. Returns the thoughts appended."""
-        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        reply = await llm.search_json(
-            self.settings.sense_tier,
-            prompts.SENSE_SYSTEM,
-            prompts.sense_user(self.spec.instruction, today),
-        )
-        items = reply.get("items") or []
-        if not isinstance(items, list):
-            items = []
-        appended = []
-        for item in items[:3]:
-            if not isinstance(item, dict) or not (item.get("title") or item.get("summary")):
-                continue
-            fps = fingerprints(item)
-            if not fps or await self._seen(fps):
-                continue
-            title = str(item.get("title") or "").strip()
-            summary = str(item.get("summary") or "").strip()
-            content = f"{title}\n{summary}".strip()
-            meta = {"url": item.get("url"), "title": title, "sense": self.name}
-            # Claim the fingerprints first; if another process beat us, skip.
-            if not await self._claim(fps):
-                continue
-            t = await self.stream.append(self.name, "world", content, meta=meta)
-            await self._attach_seq(fps, t["seq"])
-            appended.append(t)
+    async def fetch_once(self, mcp=None) -> list[dict[str, Any]]:
+        """One run of the sense workflow. Returns the thoughts appended.
+
+        `mcp` is anything with `has()` and `call()`; default: real MCP servers over stdio.
+        """
+        from . import sense_graph
+        from .frame import get_frame
+        from .mcp_client import MCPClient, search_tool
+
+        frame = await get_frame(self.stream.sessions, self.settings.ensemble)
+        if not self.spec.feeds:
+            log.info("sense %s: no feeds configured", self.name)
+            await self._touch()
+            return []
+
+        async def go(client):
+            graph = sense_graph.build(sense=self, settings=self.settings, frame=frame, mcp=client,
+                                      search=search_tool(self.settings) if client.has("search")
+                                      else None)
+            return await graph.ainvoke({})
+
+        if mcp is None:
+            async with MCPClient(self.settings) as client:
+                state = await go(client)
+        else:
+            state = await go(mcp)
+        appended = state.get("appended") or []
         await self._touch()
         log.info("sense %s: %d new item(s)", self.name, len(appended))
         return appended
+
+    async def seen(self, item: dict[str, Any]) -> bool:
+        fps = fingerprints(item)
+        return not fps or await self._seen(fps)
+
+    async def mark_seen(self, item: dict[str, Any]) -> None:
+        fps = fingerprints(item)
+        if fps:
+            await self._claim(fps)
+
+    async def emit(self, item: dict[str, Any]) -> dict[str, Any] | None:
+        """Dedup and append one item as a `world` thought. Returns it, or None if seen."""
+        if not (item.get("title") or item.get("summary")):
+            return None
+        fps = fingerprints(item)
+        if not fps or await self._seen(fps):
+            return None
+        title = str(item.get("title") or "").strip()
+        summary = str(item.get("summary") or "").strip()
+        content = f"{title}\n{summary}".strip()
+        meta = {"url": item.get("url"), "title": title, "sense": self.name}
+        # Claim the fingerprints first; if another process beat us, skip.
+        if not await self._claim(fps):
+            return None
+        t = await self.stream.append(self.name, "world", content, meta=meta)
+        await self._attach_seq(fps, t["seq"])
+        return t
 
     async def _seen(self, fps: list[str]) -> bool:
         async with self.stream.sessions() as s:

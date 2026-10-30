@@ -1,4 +1,4 @@
-"""HTTP API: feed the mind, read the record, watch it live, manage voices and senses."""
+"""HTTP API: feed the room, read the record, watch it live, manage frame, voices and senses."""
 
 from __future__ import annotations
 
@@ -8,14 +8,18 @@ import logging
 import re
 from typing import Any
 
+from datetime import datetime, timedelta, timezone
+
 from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import func, select
 
-from .cadence import create_cadence, get_cadence, run_cadence
+from . import digest as digest_mod
+from .cadence import confirm_cadence, create_cadence, get_cadence, run_cadence
 from .config import Settings
-from .db import SenseRow, VoiceRow
+from .db import FrameRow, LLMCall, ListenSample, SenseRow, VoiceRow
+from .frame import get_frame
 from .sense import MIN_EVERY_MINUTES
 from .stream import Stream
 from .voice import VoiceSpec
@@ -23,18 +27,25 @@ from .voice import VoiceSpec
 log = logging.getLogger(__name__)
 
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
-RESERVED = {"conscious", "cadence", "world", "you"}
+RESERVED = {"conscious", "person", "cadence", "world", "digest", "you"}
 HEARTBEAT_SECONDS = 15
 
 
 class ThoughtIn(BaseModel):
     content: str = Field(min_length=1)
-    author: str = "conscious"
-    kind: str = "conscious"
+    author: str = "person"
+    kind: str = "person"  # "conscious" is accepted as the v0 name
 
 
 class CadenceIn(BaseModel):
     resolution: str = Field(min_length=1)
+    confirm: bool = False
+
+
+class FramePatch(BaseModel):
+    label: str | None = None
+    person_label: str | None = None
+    text: str | None = None
 
 
 class VoiceIn(BaseModel):
@@ -53,12 +64,24 @@ class SenseIn(BaseModel):
     name: str
     instruction: str = Field(min_length=1)
     every_minutes: int = 240
+    feeds: list[str] = Field(default_factory=list)
+    search: bool = False
 
 
 class SensePatch(BaseModel):
     instruction: str | None = None
     every_minutes: int | None = None
+    feeds: list[str] | None = None
+    search: bool | None = None
     enabled: bool | None = None
+
+
+def _check_feeds(feeds: list[str]) -> list[str]:
+    out = [f.strip() for f in feeds if f.strip()]
+    for f in out:
+        if not re.match(r"^https?://", f):
+            raise HTTPException(422, f"feed must be an http(s) URL: {f}")
+    return out
 
 
 def _check_name(name: str) -> None:
@@ -78,8 +101,8 @@ def _split_voice_text(text: str, overrides: dict[str, Any] | None) -> tuple[str,
     return body, {**meta, **(overrides or {})}
 
 
-def create_app(stream: Stream, settings: Settings, lifespan=None) -> FastAPI:
-    app = FastAPI(title="Polyphony", version="0.1.0", lifespan=lifespan)
+def create_app(stream: Stream, settings: Settings, lifespan=None, memory=None) -> FastAPI:
+    app = FastAPI(title="Polyphony", version="1.0.0", lifespan=lifespan)
     background: set[asyncio.Task] = set()
 
     def spawn(coro) -> None:
@@ -102,10 +125,11 @@ def create_app(stream: Stream, settings: Settings, lifespan=None) -> FastAPI:
 
     @app.post("/thoughts")
     async def post_thought(t: ThoughtIn):
-        if t.kind not in ("conscious", "world"):
-            raise HTTPException(422, "kind must be 'conscious' or 'world'")
-        author = "conscious" if t.kind == "conscious" else (t.author or "world")
-        return await stream.append(author, t.kind, t.content.strip())
+        kind = "person" if t.kind == "conscious" else t.kind
+        if kind not in ("person", "world"):
+            raise HTTPException(422, "kind must be 'person' (or 'conscious') or 'world'")
+        author = "person" if kind == "person" else (t.author or "world")
+        return await stream.append(author, kind, t.content.strip())
 
     @app.get("/thoughts")
     async def get_thoughts(after: int = 0, limit: int = Query(200, ge=1, le=1000)):
@@ -157,9 +181,19 @@ def create_app(stream: Stream, settings: Settings, lifespan=None) -> FastAPI:
     @app.post("/cadence")
     async def post_cadence(c: CadenceIn):
         resolution = c.resolution.strip()
-        cid = await create_cadence(stream, resolution, "conscious", "running")
-        spawn(run_cadence(stream, settings, resolution, "conscious", cid))
+        cid = await create_cadence(stream, resolution, "person", "running")
+        spawn(run_cadence(stream, settings, resolution, "person", cid, confirm=c.confirm))
         return await get_cadence(stream, cid)
+
+    @app.post("/cadence/{cid}/confirm")
+    async def post_confirm(cid: int):
+        c = await get_cadence(stream, cid)
+        if c is None:
+            raise HTTPException(404, "no such cadence")
+        if c["status"] != "awaiting_confirm":
+            raise HTTPException(409, f"cadence is {c['status']}, not awaiting_confirm")
+        spawn(confirm_cadence(stream, settings, cid))
+        return {**c, "status": "running"}
 
     @app.get("/cadence/{cid}")
     async def get_one_cadence(cid: int):
@@ -227,6 +261,89 @@ def create_app(stream: Stream, settings: Settings, lifespan=None) -> FastAPI:
         await stream.forget_voice(name)
         await stream.publish_control("voices")
 
+    # ------------------------------------------------------------------ frame
+
+    @app.get("/frame")
+    async def read_frame():
+        return (await get_frame(stream.sessions, settings.ensemble)).to_dict()
+
+    @app.put("/frame")
+    async def edit_frame(f: FramePatch):
+        async with stream.sessions() as s:
+            row = await s.get(FrameRow, settings.ensemble)
+            if row is None:
+                cur = await get_frame(stream.sessions, settings.ensemble)
+                row = FrameRow(name=cur.name, label=cur.label, person_label=cur.person_label,
+                               text=cur.text)
+                s.add(row)
+            if f.label is not None:
+                row.label = f.label.strip() or row.label
+            if f.person_label is not None:
+                row.person_label = f.person_label.strip() or row.person_label
+            if f.text is not None:
+                if not f.text.strip():
+                    raise HTTPException(422, "frame text is empty")
+                row.text = f.text.strip()
+            await s.commit()
+            out = row.to_dict()
+        await stream.publish_control("frame")
+        return out
+
+    # ------------------------------------------------------------------ digest, memory
+
+    @app.post("/digest")
+    async def post_digest():
+        t = await digest_mod.write_digest(stream, settings)
+        if t is None:
+            raise HTTPException(409, "nothing new to digest")
+        return t
+
+    @app.get("/digests")
+    async def get_digests(limit: int = Query(20, ge=1, le=200)):
+        return await digest_mod.digests(stream, limit)
+
+    @app.get("/memories")
+    async def get_memories(seq: int, k: int = Query(5, ge=1, le=50)):
+        if memory is None or not memory.enabled:
+            raise HTTPException(409, "memory is off (no embedder or no pgvector)")
+        return (await memory.recall_at(seq))[:k]
+
+    # ------------------------------------------------------------------ stats
+
+    @app.get("/stats")
+    async def stats(hours: float = Query(24, gt=0, le=24 * 30)):
+        since = datetime.now(timezone.utc) - timedelta(hours=hours)
+        async with stream.sessions() as s:
+            rows = (await s.execute(
+                select(LLMCall.tier, LLMCall.provider, LLMCall.model,
+                       func.count(), func.count().filter(LLMCall.ok.is_(False)),
+                       func.sum(LLMCall.input_tokens), func.sum(LLMCall.output_tokens),
+                       func.sum(LLMCall.cached_input_tokens), func.avg(LLMCall.latency_ms),
+                       func.percentile_cont(0.95).within_group(LLMCall.latency_ms),
+                       func.avg(LLMCall.queue_ms),
+                       func.percentile_cont(0.95).within_group(LLMCall.queue_ms))
+                .where(LLMCall.created_at >= since)
+                .group_by(LLMCall.tier, LLMCall.provider, LLMCall.model)
+            )).all()
+            samples = (await s.scalars(
+                select(ListenSample).where(ListenSample.source == "live",
+                                           ListenSample.created_at >= since,
+                                           ListenSample.student_decision.isnot(None),
+                                           ListenSample.teacher_decision.isnot(None))
+            )).all()
+        tiers = [{
+            "tier": r[0], "provider": r[1], "model": r[2], "calls": r[3],
+            "errors": int(r[4] or 0), "input_tokens": int(r[5] or 0),
+            "output_tokens": int(r[6] or 0), "cached_input_tokens": int(r[7] or 0),
+            "latency_ms_avg": round(float(r[8] or 0)), "latency_ms_p95": round(float(r[9] or 0)),
+            "queue_ms_avg": None if r[10] is None else round(float(r[10])),
+            "queue_ms_p95": None if r[11] is None else round(float(r[11])),
+        } for r in rows]
+        from .distill import agreement
+
+        pairs = [(x.student_decision, x.teacher_decision) for x in samples]
+        return {"hours": hours, "tiers": tiers, "student_teacher": agreement(pairs)}
+
     # ------------------------------------------------------------------ senses
 
     @app.get("/senses")
@@ -242,7 +359,8 @@ def create_app(stream: Stream, settings: Settings, lifespan=None) -> FastAPI:
             if await s.get(SenseRow, x.name):
                 raise HTTPException(409, "a sense with that name exists")
             row = SenseRow(name=x.name, instruction=x.instruction.strip(),
-                           every_minutes=max(MIN_EVERY_MINUTES, x.every_minutes), enabled=True)
+                           every_minutes=max(MIN_EVERY_MINUTES, x.every_minutes),
+                           feeds=_check_feeds(x.feeds), search=x.search, enabled=True)
             s.add(row)
             await s.commit()
             out = row.to_dict()
@@ -259,6 +377,10 @@ def create_app(stream: Stream, settings: Settings, lifespan=None) -> FastAPI:
                 row.instruction = x.instruction.strip()
             if x.every_minutes is not None:
                 row.every_minutes = max(MIN_EVERY_MINUTES, x.every_minutes)
+            if x.feeds is not None:
+                row.feeds = _check_feeds(x.feeds)
+            if x.search is not None:
+                row.search = x.search
             if x.enabled is not None:
                 row.enabled = x.enabled
             await s.commit()
