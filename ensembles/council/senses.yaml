@@ -1,0 +1,6 @@
+- name: housing
+  instruction: "News about housing costs, remote work and moving between Canadian cities."
+  every_minutes: 720
+  feeds:
+    - https://www.cbc.ca/webfeed/rss/rss-business
+  search: false

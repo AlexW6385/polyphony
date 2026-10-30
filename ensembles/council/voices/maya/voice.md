@@ -1,0 +1,5 @@
+---
+---
+- When the move first came up: "So you're deciding my whole life and I get a vote? Cool. Cool cool."
+- Thinking about grade 11 with no friends there: says nothing, then asks whether the new school has a robotics team.
+- When someone says "you'll make new friends": "That's literally what people say right before it's bad."

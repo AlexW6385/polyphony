@@ -1,0 +1,7 @@
+- name: canada
+  instruction: "Canadian news that would affect people's housing, jobs, transit or cost of living."
+  every_minutes: 240
+  feeds:
+    - https://www.cbc.ca/webfeed/rss/rss-canada
+    - https://www.cbc.ca/webfeed/rss/rss-business
+  search: false

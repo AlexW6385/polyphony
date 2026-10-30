@@ -37,7 +37,7 @@ class Thought(Base):
 
     seq: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     author: Mapped[str] = mapped_column(String(64))
-    kind: Mapped[str] = mapped_column(String(16))  # voice | conscious | world | cadence
+    kind: Mapped[str] = mapped_column(String(16))  # voice | person | world | cadence | digest
     content: Mapped[str] = mapped_column(Text)
     mood: Mapped[str | None] = mapped_column(String(80), nullable=True)
     meta: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
@@ -129,6 +129,8 @@ class SenseRow(Base):
     name: Mapped[str] = mapped_column(String(64), primary_key=True)
     instruction: Mapped[str] = mapped_column(Text)
     every_minutes: Mapped[int] = mapped_column(Integer)
+    feeds: Mapped[list[str]] = mapped_column(JSONB, default=list, server_default="[]")
+    search: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     last_run: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -137,6 +139,8 @@ class SenseRow(Base):
             "name": self.name,
             "instruction": self.instruction,
             "every_minutes": self.every_minutes,
+            "feeds": list(self.feeds or []),
+            "search": bool(self.search),
             "enabled": self.enabled,
             "last_run": self.last_run.isoformat() if self.last_run else None,
         }
@@ -152,6 +156,71 @@ class SenseLog(Base):
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class FrameRow(Base):
+    """What this polyphony is. One row per ensemble; the running one is used."""
+
+    __tablename__ = "frames"
+
+    name: Mapped[str] = mapped_column(String(64), primary_key=True)
+    label: Mapped[str] = mapped_column(Text)
+    person_label: Mapped[str] = mapped_column(Text)
+    text: Mapped[str] = mapped_column(Text)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {"name": self.name, "label": self.label, "person_label": self.person_label,
+                "text": self.text}
+
+
+class LLMCall(Base):
+    """One row per model call: the raw material of /stats and the evals."""
+
+    __tablename__ = "llm_calls"
+    __table_args__ = (Index("ix_llm_calls_created", "created_at"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    tier: Mapped[str] = mapped_column(String(16))
+    provider: Mapped[str] = mapped_column(String(32))
+    model: Mapped[str] = mapped_column(String(128))
+    purpose: Mapped[str] = mapped_column(String(32))
+    voice: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    latency_ms: Mapped[int] = mapped_column(Integer)
+    queue_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    cached_input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    ok: Mapped[bool] = mapped_column(Boolean)
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class ListenSample(Base):
+    """A listen input with the student's and/or the teacher's decision.
+
+    `source` is `live` (shadow teacher on real runs) or `synthetic` (self-play).
+    """
+
+    __tablename__ = "listen_samples"
+    __table_args__ = (Index("ix_listen_samples_source_id", "source", "id"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    listen_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    source: Mapped[str] = mapped_column(String(16))
+    ensemble: Mapped[str] = mapped_column(String(64))
+    voice: Mapped[str] = mapped_column(String(64))
+    system: Mapped[str] = mapped_column(Text)
+    prompt: Mapped[str] = mapped_column(Text)
+    student_provider: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    student_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    student_decision: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    teacher_provider: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    teacher_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
+    teacher_decision: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 def make_engine(url: str) -> AsyncEngine:
     return create_async_engine(url, pool_pre_ping=True, pool_size=10, max_overflow=20)
 
@@ -160,12 +229,15 @@ def make_sessionmaker(engine: AsyncEngine) -> async_sessionmaker:
     return async_sessionmaker(engine, expire_on_commit=False)
 
 
-async def init_db(engine: AsyncEngine, attempts: int = 30) -> None:
-    """Create tables. Retries so `docker compose up` works without ordering tricks."""
+async def init_db(engine: AsyncEngine, attempts: int = 30, embed_dim: int = 768) -> None:
+    """Create tables, then run migrations. Retries so `docker compose up` needs no ordering."""
+    from .migrations import run_migrations
+
     for i in range(attempts):
         try:
             async with engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
+            await run_migrations(engine, embed_dim=embed_dim)
             return
         except (OSError, ConnectionError) as e:  # DB not up yet
             log.info("waiting for database (%s/%s): %s", i + 1, attempts, e)
