@@ -37,6 +37,27 @@ ProposeFn = Callable[[str, str], Awaitable[Any]]  # (proposer, resolution)
 # human, not a contribution, so it must not restart the discussion.
 SILENT_KINDS = {"digest"}
 
+# Small listen models copy schema placeholders into propose_cadence, or echo the
+# proposal thought back; none of these is a resolution anyone could vote on.
+PROPOSAL_PREFIX = "i think we should decide this:"
+NOT_A_PROPOSAL = {
+    "", "null", "none", "n/a", "no", "false", "cadence",
+    "a resolution, phrased so it can be voted for or against",
+    "a resolution",
+}
+PLACEHOLDER_FRAGMENT = "phrased so it can be voted"
+
+
+def repeats_proposal(proposal: str, recent: list[dict[str, Any]]) -> bool:
+    """True if this resolution was already proposed or voted on in the recent window."""
+    needle = proposal.strip(" \"'.").casefold()
+    for t in recent:
+        content = t["content"].casefold()
+        is_proposal = t["kind"] == "voice" and content.startswith(PROPOSAL_PREFIX)
+        if (is_proposal or t["kind"] == "cadence") and needle in content:
+            return True
+    return False
+
 
 @dataclass(frozen=True)
 class VoiceSpec:
@@ -170,6 +191,8 @@ class Voice:
             tier_name="listen", purpose="listen", voice=self.name,
         )
         decision = normalize_decision(decision)
+        if decision["propose_cadence"] and repeats_proposal(decision["propose_cadence"], recent):
+            decision["propose_cadence"] = None
         row = await self.stream.record_listen(self.name, recent[-1]["seq"], decision)
         log.info("%s listened: %s — %s — %s", self.name,
                  "speak" if decision["speak"] else "quiet", decision["mood"], decision["reason"])
@@ -256,7 +279,12 @@ def normalize_decision(d: dict[str, Any]) -> dict[str, Any]:
     except (TypeError, ValueError):
         pause = 0.0
     proposal = d.get("propose_cadence")
-    if not isinstance(proposal, str) or not proposal.strip() or proposal.strip().lower() == "null":
+    if isinstance(proposal, str):
+        proposal = proposal.strip()
+        if proposal.lower().startswith(PROPOSAL_PREFIX):
+            proposal = proposal[len(PROPOSAL_PREFIX):].strip()
+    if (not isinstance(proposal, str) or proposal.strip(" \"'.").lower() in NOT_A_PROPOSAL
+            or PLACEHOLDER_FRAGMENT in proposal.lower()):
         proposal = None
     return {
         "speak": bool(speak),

@@ -7,7 +7,7 @@ from polyphony.cadence import average_weights, tally
 from polyphony.config import TierConfig
 from polyphony.llm import LLMError, extract_json, resolve_tier
 from polyphony.sense import fingerprints
-from polyphony.voice import VoiceSpec, normalize_decision
+from polyphony.voice import VoiceSpec, normalize_decision, repeats_proposal
 
 
 def test_extract_json_from_chatty_reply():
@@ -53,6 +53,35 @@ def test_normalize_decision_is_lenient():
     d = normalize_decision({"speak": "yes", "pause_seconds": "3", "propose_cadence": "null"})
     assert d == {"speak": True, "mood": "", "reason": "", "pause_seconds": 3.0,
                  "propose_cadence": None}
+
+
+@pytest.mark.parametrize("raw", [
+    "a resolution, phrased so it can be voted for or against",
+    '"A resolution, phrased so it can be voted for or against."',
+    "cadence",
+    "I think we should decide this: a resolution, phrased so it can be voted for or against",
+    "Cadence on: 'a resolution, phrased so it can be voted for or against'",
+])
+def test_normalize_decision_drops_placeholder_proposals(raw):
+    assert normalize_decision({"propose_cadence": raw})["propose_cadence"] is None
+
+
+def test_normalize_decision_keeps_real_proposals():
+    d = normalize_decision({"propose_cadence": " I think we should decide this: 明早骑车 "})
+    assert d["propose_cadence"] == "明早骑车"
+
+
+def test_repeats_proposal_only_looks_at_proposals_and_cadences():
+    recent = [
+        {"seq": 1, "kind": "voice", "author": "doubt", "content": "Let's vote on: ride at 7."},
+        {"seq": 2, "kind": "voice", "author": "ride",
+         "content": "I think we should decide this: skip class and ride"},
+        {"seq": 3, "kind": "cadence", "author": "cadence",
+         "content": 'Proposal by learn not taken up (0 of 3): "study all Saturday"'},
+    ]
+    assert repeats_proposal("Skip class and ride.", recent)
+    assert repeats_proposal("study all Saturday", recent)
+    assert not repeats_proposal("ride at 7", recent)
 
 
 def test_average_weights_normalises():

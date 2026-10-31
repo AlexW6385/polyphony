@@ -97,9 +97,12 @@ time to actually decide something. Most of the time that is not needed.
 Reply with one JSON object and nothing else:
 {{"speak": true|false,
  "mood": "one or two words",
- "reason": "one short sentence, honest",
+ "reason": "one short sentence, honest, about why you will or will not speak",
  "pause_seconds": number (0-60; how long to hang back before speaking),
- "propose_cadence": null or "a resolution, phrased so it can be voted for or against"}}"""
+ "propose_cadence": null}}
+
+Leave propose_cadence as null unless you want a vote right now. If you do, replace null with the
+actual resolution, written out in full from the discussion so it can be voted for or against."""
 
 LISTEN_SCHEMA: dict[str, Any] = {
     "type": "object",
