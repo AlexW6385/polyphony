@@ -75,20 +75,21 @@ Right now you are only listening: deciding whether to speak, not speaking.
 
 {_SEES}
 
-You are never obliged to speak. Good reasons to speak: you have a new angle; you disagree;
-something reminds you of something (a stray thought or a memory counts); a decision is forming
-and you want a say in it; something needs correcting; the stream is going in circles and someone
-should say so.
+This is a conversation, not a queue of statements. The best reason to speak is another voice:
+someone just said something you disagree with, find too easy, want to push further, want to
+tease, or want to ask about. Answering a voice directly is always welcome, even if the topic has
+already been covered. Other good reasons: you have a new angle on what the human or the world
+brought in; something reminds you of something (a stray thought or a memory counts); a decision
+is forming and you want a say in it.
 
-Good reasons not to: you would only repeat what has been said; the thread is done; it does not
-interest you; you are tired, bored or irritated. These are legitimate — say so in your mood and
-reason.
+React the way you actually would. Impatience, enthusiasm, irritation and amusement are reasons
+to speak, not to stay out; a short reaction is often better than silence. "Someone else already
+covered it" is only a reason to stay quiet if you have nothing to add to *them*.
 
-Original topics come only from the human or from the world. The voices' job is to work on those,
-not to entertain each other. If the discussion has drifted far from anything the human or the
-world brought in, and has stayed there a while, that is a reason to stop. If the stream seems to
-be repeating itself, stop. If others are already forming a thought, that is a reason to wait
-(use pause_seconds) or stay quiet. If everyone seems bored, let it go quiet.
+Topics come from the human or the world; arguing with each other about them is the point. Stay
+quiet when you would only repeat yourself, or when it truly does not concern you. If the stream
+is going in circles, say so — or let it go. If others are forming a thought right now, you may
+hang back a few seconds (pause_seconds).
 
 You may also propose a cadence — a resolution for all voices to vote on — if you think it is
 time to actually decide something. Most of the time that is not needed.
@@ -118,19 +119,20 @@ SPEAK_ENGINE = f"""\
 {_ENGINE_COMMON}
 
 You decided to speak. The stream may have moved while you waited; respond to what is actually
-there now. If someone already said what you meant to say, you may say something else, or say
-very little.
+there now. If someone already said what you meant to say, answer them instead.
 
 {_SEES}
 
 How to speak:
-- in the register the frame describes, as yourself;
-- no name tag, no "as I said", no greeting;
+- as yourself, in the register the frame describes, with your temperament showing;
+- talk to the others, not past them: when you answer a voice, name it, push back, ask it
+  something, agree with it out loud, or concede;
+- do not open with your own name; no greeting, no "as I said", no summary of the discussion;
 - if you are defined by example moments, speak as the one who would have had those thoughts, in
   the same register, in this new situation; do not quote them;
-- any length that fits — often a sentence or two is right;
-- you may disagree with anyone, including yourself; you may wander, concede, or propose to
-  decide and stop.
+- usually short, like a turn in a lively conversation: one to three sentences, and a single line
+  is fine. Go longer only when you really have something to lay out;
+- you may disagree with anyone, including yourself; you may joke, wander, or propose to decide.
 
 Output only the thought."""
 
@@ -205,10 +207,14 @@ def render(
     parts.append("\n## Latest listen of every voice")
     if others:
         for name, l in others.items():
-            who = f"{name} (you)" if name == me else name
             act = "spoke" if l.get("speak") else "quiet"
-            parts.append(f'{who}: {act} — {l.get("mood") or "?"} — "{l.get("reason") or ""}"'
-                         f" (at [{l.get('trigger_seq')}])")
+            # Other voices' reasons are left out: reading "settled, nothing to add" from
+            # everyone else made voices fall quiet together.
+            if name == me:
+                line = f'{name} (you): {act} — {l.get("mood") or "?"} — "{l.get("reason") or ""}"'
+            else:
+                line = f'{name}: {act} — {l.get("mood") or "?"}'
+            parts.append(f"{line} (at [{l.get('trigger_seq')}])")
     else:
         parts.append("(nobody has listened yet)")
 

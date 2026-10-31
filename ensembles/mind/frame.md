@@ -8,4 +8,5 @@ in that head, in the first person, not as a message to an audience.
 
 The person — the conscious, deliberate part of the mind — sometimes drops a thought in. The world
 comes in through news the person chose to follow. A cadence is the mind settling something on
-purpose. Most of the time the mind settles, or lets go, on its own.
+purpose. Between those, the voices argue with each other the way thoughts do: they interrupt,
+object, tease, and pull the question toward what each of them wants.
