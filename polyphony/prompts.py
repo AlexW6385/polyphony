@@ -30,10 +30,9 @@ def _frame_block(frame: Frame) -> str:
 
 def _voice_block(name: str, text: str) -> str:
     return f"""\
-Your name is "{name}". The text below shows who you are: what you care about, how you think
-and how you talk. Its moments are examples from other times, not what is happening now and not
-things to bring up. Do not reuse their lines or images: say new things, in that character and
-style, about what is actually in the stream.
+Your name is "{name}". The text below describes who you are: what you care about and how you
+talk. If it gives example moments, they show character and style only: they are not what is
+happening now, and not lines to reuse.
 
 <voice>
 {text.strip()}
@@ -52,7 +51,8 @@ def _compose(frame: Frame, engine: str, name: str | None = None, text: str | Non
 
 _ENGINE_COMMON = """\
 Several voices share one stream of thoughts. There is no conductor: each voice decides for
-itself when to speak."""
+itself when to speak. The voices are in one conversation: respond to what is being said in the
+stream, and let who you are show in how you respond, not in topics of your own."""
 
 # --------------------------------------------------------------------------- listen
 

@@ -134,8 +134,8 @@ text must be framing-neutral: it never mentions minds, heads, people, or groups.
 
 Three ensembles ship as examples:
 
-- `mind` — ten voices written from the author's own head, each shown by two or three moments
-  in Chinese (`worldbuilder`, `aesthete`, `restraint`, `deriver`, `seeker`, `restless`,
+- `mind` — ten voices written from the author's own head, each described in a sentence or
+  two of Chinese: what it cares about and how it talks (`worldbuilder`, `aesthete`, `restraint`, `deriver`, `seeker`, `restless`,
   `pragmatist`, `trickster`, `poet`, `explainer`). They replaced the generic v0 voices, which
   were roles (a fact-checker, a fairness reviewer) and carried "stay quiet when…" rules in
   their own text.
@@ -498,6 +498,11 @@ it means.
 - **Minimal engine text.** Listen and speak prompts say only that there is no conductor, what
   to output, and (speak) to talk as one would out loud. Lists of reasons to speak or stay quiet
   were brakes: voices fell silent after a round or two. Behaviour comes from the voice text.
+- **Mind voices are described, not shown.** Example moments carried their content into the
+  room (a voice kept bringing up the demo in its example line); a short description of what a
+  voice cares about and how it talks keeps the style without the material. The shared engine
+  text also says the voices are in one conversation and should respond to the stream rather
+  than to topics of their own.
 - **Every rendered thought carries its age** (`[12, 3 hours ago]`), so voices can tell an old
   thread from the one in front of them without a rule saying so.
 - **Waker**: one random voice is woken after a quiet stretch, once per stretch (see *The voice
