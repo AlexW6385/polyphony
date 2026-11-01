@@ -502,6 +502,11 @@ it means.
   thread from the one in front of them without a rule saying so.
 - **Waker**: one random voice is woken after a quiet stretch, once per stretch (see *The voice
   loop*). Off with `IDLE_WAKE_SECONDS=0`; evals and the simulator turn it off.
+- **One switch stops everything.** `POST /pause` (the **Stop all** button) sets a Redis flag
+  with no TTL; the supervisor then stops every voice, sense and edge component, the API
+  cancels its running cadences and refuses new ones and digests, and cadence-running flags are
+  cleared. Thoughts can still be dropped in. The flag outlives an app restart, so a stopped
+  room stays stopped until `POST /resume`.
 
 ## Not built (deliberately)
 
@@ -615,6 +620,8 @@ POST /cadence/{id}/confirm     resumes a cadence paused before recording
 GET  /stats?hours=24           calls, tokens, latency per tier/provider; student–teacher agreement
 GET  /memories?seq=<n>&k=5     debug: what memory retrieves for a point in the stream
 POST /digest                   write a digest now for everything since the last one
+POST /pause  POST /resume      stop / restart every voice, sense and background component
+GET  /pause                    {paused}
 GET  /digests?limit=20         recent digests
 ```
 

@@ -337,3 +337,28 @@ async def test_api_validation(stream, settings, fake):
         r = await c.post("/senses", json={"name": "s", "instruction": "x", "every_minutes": 1})
         assert r.json()["every_minutes"] == 30
         assert (await c.get("/health")).json() == {"ok": True}
+
+
+async def test_pause_stops_everything_and_resume_restarts(stream, settings, mind, fake):
+    app = create_app(stream, settings)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
+        assert (await c.post("/pause")).json() == {"paused": True}
+        for _ in range(50):
+            if not mind.voices and not mind.edges:
+                break
+            await asyncio.sleep(0.1)
+        assert not mind.voices and not mind.edges
+        assert (await c.get("/pause")).json() == {"paused": True}
+        assert (await c.post("/cadence", json={"resolution": "go"})).status_code == 409
+
+        # a thought still lands while paused, but nobody answers it
+        await c.post("/thoughts", json={"content": "anyone there?"})
+        await asyncio.sleep(0.5)
+        assert not [t for t in await stream.thoughts() if t["kind"] == "voice"]
+
+        assert (await c.post("/resume")).json() == {"paused": False}
+        for _ in range(50):
+            if len(mind.voices) == 3:
+                break
+            await asyncio.sleep(0.1)
+        assert sorted(mind.voices) == ["make", "rest", "ride"]

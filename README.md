@@ -162,6 +162,7 @@ repetition, voice fidelity, engagement and convergence.
 | `POST /cadence` `{resolution, confirm?}` · `GET /cadence/{id}` · `POST /cadence/{id}/confirm` | weighted vote |
 | `GET/PUT /frame` | what this polyphony is |
 | `POST /digest` · `GET /digests` | outcome summaries |
+| `POST /pause` · `POST /resume` · `GET /pause` | stop / restart everything that calls a model (also the **Stop all** button) |
 | `GET /stats?hours=` | calls, tokens, latency, queue wait; student–teacher agreement |
 | `GET /memories?seq=&k=` | debug: what memory retrieves at a point |
 | `/voices`, `/senses` | manage live |

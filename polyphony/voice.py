@@ -148,8 +148,11 @@ class Voice:
                 except Exception:
                     log.exception("voice %s: listen failed; staying quiet this time", self.name)
         finally:
-            listener.cancel()
-            await asyncio.gather(listener, return_exceptions=True)
+            # Stopping a voice also stops anything it started, such as a cadence proposal.
+            tasks = [listener, *self._background]
+            for t in tasks:
+                t.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
             try:
                 await self.stream.set_forming(self.name, False)
             except Exception:

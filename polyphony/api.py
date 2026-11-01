@@ -117,6 +117,29 @@ def create_app(stream: Stream, settings: Settings, lifespan=None, memory=None) -
         await stream.redis.ping()
         return {"ok": True}
 
+    # ------------------------------------------------------------------ pause
+
+    @app.get("/pause")
+    async def get_pause():
+        return {"paused": await stream.paused()}
+
+    @app.post("/pause")
+    async def post_pause():
+        """Stop everything that calls a model: voices, senses, waker, digest, cadences."""
+        await stream.set_paused(True)
+        for t in list(background):
+            t.cancel()
+        return {"paused": True}
+
+    @app.post("/resume")
+    async def post_resume():
+        await stream.set_paused(False)
+        return {"paused": False}
+
+    async def refuse_if_paused() -> None:
+        if await stream.paused():
+            raise HTTPException(409, "paused: resume first")
+
     @app.get("/")
     async def index():
         return FileResponse(settings.static_dir / "index.html")
@@ -180,6 +203,7 @@ def create_app(stream: Stream, settings: Settings, lifespan=None, memory=None) -
 
     @app.post("/cadence")
     async def post_cadence(c: CadenceIn):
+        await refuse_if_paused()
         resolution = c.resolution.strip()
         cid = await create_cadence(stream, resolution, "person", "running")
         spawn(run_cadence(stream, settings, resolution, "person", cid, confirm=c.confirm))
@@ -187,6 +211,7 @@ def create_app(stream: Stream, settings: Settings, lifespan=None, memory=None) -
 
     @app.post("/cadence/{cid}/confirm")
     async def post_confirm(cid: int):
+        await refuse_if_paused()
         c = await get_cadence(stream, cid)
         if c is None:
             raise HTTPException(404, "no such cadence")
@@ -293,6 +318,7 @@ def create_app(stream: Stream, settings: Settings, lifespan=None, memory=None) -
 
     @app.post("/digest")
     async def post_digest():
+        await refuse_if_paused()
         t = await digest_mod.write_digest(stream, settings)
         if t is None:
             raise HTTPException(409, "nothing new to digest")

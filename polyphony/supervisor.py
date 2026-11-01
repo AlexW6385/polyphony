@@ -6,7 +6,9 @@ running and starts, stops, or restarts (text changed) the affected tasks. A
 frame edit changes every voice's fingerprint, so all voices restart with it.
 
 It also runs the edge components that are not per-row: the memory embedder,
-the digester and the waker.
+the digester and the waker. While the room is paused (`Stream.set_paused`) it
+runs nothing at all: every voice, sense and edge component is stopped until
+it is resumed.
 This is what makes "add a voice from the UI" work without a restart, and it
 works across processes because the signal goes through Redis.
 """
@@ -61,9 +63,12 @@ class Supervisor:
 
     async def sync(self) -> None:
         async with self._lock:
+            paused = await self.stream.paused()
+            await self._sync_edges(not paused)
             frame = await get_frame(self.stream.sessions, self.settings.ensemble)
             ffp = repr(frame.to_dict())
-            specs = {s.name: s for s in await load_voice_specs(self.stream.sessions, self.settings)}
+            specs = {} if paused else {
+                s.name: s for s in await load_voice_specs(self.stream.sessions, self.settings)}
             await self._diff(
                 self.voices,
                 {n: s.fingerprint() + ffp for n, s in specs.items()},
@@ -75,7 +80,7 @@ class Supervisor:
             if self.run_senses:
                 async with self.stream.sessions() as s:
                     rows = (await s.scalars(select(SenseRow).where(SenseRow.enabled))).all()
-                sspecs = {r.name: SenseSpec.from_row(r) for r in rows}
+                sspecs = {} if paused else {r.name: SenseSpec.from_row(r) for r in rows}
                 await self._diff(
                     self.senses,
                     {n: s.fingerprint() for n, s in sspecs.items()},
@@ -103,6 +108,16 @@ class Supervisor:
                 running[name] = _Running(task, fp)
                 log.info("started %s %s", kind, name)
 
+    async def _sync_edges(self, on: bool) -> None:
+        if on and not self.edges:
+            self._start_edges()
+        elif not on and self.edges:
+            edges, self.edges = self.edges, []
+            for t in edges:
+                t.cancel()
+            await asyncio.gather(*edges, return_exceptions=True)
+            log.info("paused: background components stopped")
+
     def _start_edges(self) -> None:
         if self.memory is not None and self.settings.run_memory and self.memory.enabled:
             self.edges.append(asyncio.create_task(self.memory.run(), name="memory"))
@@ -114,7 +129,6 @@ class Supervisor:
             self.edges.append(asyncio.create_task(waker.run(), name="waker"))
 
     async def run(self) -> None:
-        self._start_edges()
         await self.sync()
         pubsub = self.stream.redis.pubsub()
         await pubsub.subscribe(self.stream.key(K_CONTROL))

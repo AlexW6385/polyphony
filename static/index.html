@@ -24,6 +24,7 @@
   header h1 { margin: 0; font-size: 18px; letter-spacing: .02em; }
   header .tag { color: var(--muted); font-style: italic; }
   header .status { margin-left: auto; color: var(--muted); font-size: 12px; }
+  header #pause.paused { border-color: var(--cadence); color: var(--cadence); }
   main { display: grid; grid-template-columns: 300px minmax(0, 1fr) 320px; gap: 0;
          height: calc(100vh - 53px); }
   section { overflow-y: auto; padding: 16px; }
@@ -92,6 +93,7 @@
   <h1>Polyphony</h1><span class="tag">many voices, no conductor</span>
   <span class="small" id="frame-label"></span>
   <span class="status" id="status">connecting…</span>
+  <button id="pause" title="Stop every voice, sense and background job">Stop all</button>
 </header>
 <main>
   <section id="side">
@@ -374,9 +376,25 @@ $("#awaiting").addEventListener("click", async (e) => {
   const id = e.target.dataset.confirm; if (!id) return;
   await api("POST", `/cadence/${id}/confirm`); pollAwaiting();
 });
+// One switch for everything that calls a model; thoughts can still be dropped in while stopped.
+let paused = false;
+function showPause(p) {
+  paused = p;
+  $("#pause").textContent = p ? "Resume" : "Stop all";
+  $("#pause").classList.toggle("paused", p);
+  $("#pause").title = p ? "Everything is stopped. Resume voices, senses and background jobs"
+                        : "Stop every voice, sense and background job";
+}
+async function refreshPause() {
+  try { showPause((await api("GET", "/pause")).paused); } catch {}
+}
+$("#pause").addEventListener("click", async () => {
+  showPause((await api("POST", paused ? "/resume" : "/pause")).paused);
+});
 $("#digest-now").addEventListener("click", async () => {
   const r = await fetch("/digest", {method: "POST"});
-  if (r.status === 409) alert("Nothing new to digest.");
+  if (r.status === 409) alert((await r.json()).detail === "nothing new to digest"
+                              ? "Nothing new to digest." : "Stopped. Resume first.");
 });
 $("#stream").addEventListener("click", async (e) => {
   if (!$("#debug").checked) return;
@@ -412,8 +430,9 @@ async function refreshStats() {
 (async () => {
   await loadHistory();
   connect();
-  refreshVoices(); refreshSenses(); loadFrame(); refreshStats();
+  refreshVoices(); refreshSenses(); loadFrame(); refreshStats(); refreshPause();
   setInterval(refreshVoices, 3000);
+  setInterval(refreshPause, 5000);
   setInterval(refreshSenses, 30000);
   setInterval(refreshStats, 15000);
 })();

@@ -31,6 +31,7 @@ K_LISTEN = "listen:"  # + voice name -> latest listen JSON
 K_CONTROL = "control"  # pub/sub; {"voices"|"senses"|"frame": "changed"}
 K_CADENCE = "cadence:running"  # set while a cadence is running (with a TTL)
 K_MEMQ = "memq:"  # + tail seq -> cached memory retrieval
+K_PAUSED = "paused"  # set while everything is stopped (no TTL: survives app restarts)
 
 KINDS = {"voice", "person", "world", "cadence", "digest"}
 ALIASES = {"conscious": "person"}  # v0 name for the human's thoughts
@@ -198,6 +199,21 @@ class Stream:
 
     async def publish_control(self, what: str) -> None:
         await self.redis.publish(self.key(K_CONTROL), json.dumps({what: "changed"}))
+
+    async def paused(self) -> bool:
+        return bool(await self.redis.exists(self.key(K_PAUSED)))
+
+    async def set_paused(self, on: bool) -> None:
+        """Stop or restart every voice, sense and background component, in any process."""
+        if on:
+            await self.redis.set(self.key(K_PAUSED), "1")
+            # A cadence cut off mid-way would otherwise hold voices back until its TTL.
+            async for k in self.redis.scan_iter(match=self.key(K_CADENCE) + ":*", count=100):
+                await self.redis.delete(k)
+            await self.redis.delete(self.key(K_FORMING))
+        else:
+            await self.redis.delete(self.key(K_PAUSED))
+        await self.publish_control("paused")
 
     async def cadence_running(self) -> bool:
         async for _ in self.redis.scan_iter(match=self.key(K_CADENCE) + ":*", count=100):
