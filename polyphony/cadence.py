@@ -2,7 +2,7 @@
 
     round 1 standing: every voice weights every voice for this question; averaged, normalised
     round 2 vote:     every voice says which options it supports (any number), weighted
-    -> each option's weighted support; the top one wins if it has more than half and is
+    -> each option's weighted support; the top one wins if it has at least 80% and is
        strictly ahead of the next, otherwise the question stays open
     -> a `cadence` thought in the stream with the full result
 
@@ -24,6 +24,8 @@ from .frame import Frame
 from .voice import VoiceSpec
 
 log = logging.getLogger(__name__)
+
+DECIDE_SHARE = 0.8  # weighted support an option needs to be decided
 
 
 async def _context(stream: Stream, settings: Settings, spec: VoiceSpec) -> str:
@@ -106,7 +108,7 @@ def tally(weights: dict[str, float], votes: dict[str, dict[str, Any]],
     """Each option's weighted support among the voices that answered.
 
     A voice may support several options (approval voting). The top option wins if its
-    support is above one half and strictly above the next; otherwise nothing is decided.
+    support is at least DECIDE_SHARE and strictly above the next; otherwise nothing is decided.
     """
     answered = [n for n, v in votes.items() if v.get("answered", True)]
     total = sum(weights.get(n, 0) for n in answered)
@@ -116,7 +118,7 @@ def tally(weights: dict[str, float], votes: dict[str, dict[str, Any]],
         shares.append(round(w / total, 4) if total > 0 else 0.0)
     order = sorted(range(len(options)), key=lambda i: -shares[i])
     top = order[0] if order else None
-    decided = (top is not None and shares[top] > 0.5
+    decided = (top is not None and shares[top] >= DECIDE_SHARE
                and (len(order) < 2 or shares[top] > shares[order[1]]))
     return {"shares": shares, "winner": top if decided else None, "decided": decided}
 
@@ -147,7 +149,7 @@ def summarize(question: str, options: list[str], weights: dict[str, float],
         w = result["winner"]
         verdict = f"DECIDED: {letter(w)}. {options[w]} ({result['shares'][w]:.0%})"
     else:
-        verdict = "UNDECIDED: no option had more than half"
+        verdict = f"UNDECIDED: no option had {DECIDE_SHARE:.0%} or more"
     lines = [f"Cadence on: {question}", verdict, ""]
     lines += [f"{letter(i)}. {o} — {result['shares'][i]:.0%}" for i, o in enumerate(options)]
     lines += ["", "Weights: " + ", ".join(f"{n} {w:.2f}" for n, w in

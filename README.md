@@ -46,7 +46,7 @@ Without Docker: Python 3.12+, PostgreSQL 16, Redis 7, then
 | **conscious** | you: the conscious part of the mind; what you type under **Think** |
 | **listen** | a voice reading the stream and deciding whether to speak, or staying **quiet** |
 | **clerk** | not a voice: every 15 new thoughts, and after 30 s of quiet, decides whether a vote is due and drafts its question and options; after quiet the discussion is over, so it calls a vote unless there is truly nothing to decide |
-| **cadence** | the vote: voices weigh each other, then support any of the options; the top option wins with more than half; one at a time, everyone else waits |
+| **cadence** | the vote: voices weigh each other, then support any of the options; the top option wins with at least 80%; one at a time, everyone else waits |
 | **digest** | the outcome of a stretch of the stream, written after 90 s of quiet |
 | **sense** | a standing instruction that brings news from your feeds in as `world` thoughts, once a day |
 

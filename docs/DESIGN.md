@@ -58,7 +58,7 @@ differs by trigger: mid-discussion (every 15) it calls a vote only when one is c
 after 30 s of quiet the discussion is over and would otherwise end with no decision, so it
 calls one on the main choice, even when the voices seem to agree, unless there is truly nothing
 to decide. The cadence weighs the voices as before, then each voice
-supports any number of the options (approval voting); an option wins with more than half of the
+supports any number of the options (approval voting); an option wins with at least 80% of the
 weighted support and strictly ahead of the next, otherwise the question stays open. The
 yes/no "worth deciding now?" round and the confirm step are gone, as are `POST /cadence` and
 `POST /digest`.
