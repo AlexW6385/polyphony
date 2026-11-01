@@ -1,4 +1,4 @@
-"""The score: the only shared thing.
+"""The stream: the only shared thing.
 
 PostgreSQL decides the order of record (`seq`). Redis holds a cache of the
 recent window, the set of voices currently forming, every voice's latest
@@ -28,17 +28,17 @@ K_THOUGHTS = "thoughts"  # pub/sub; payload = thought JSON
 K_RECENT = "recent"  # sorted set of thought JSON scored by seq, trimmed to the window
 K_FORMING = "forming"  # set of voice names currently composing
 K_LISTEN = "listen:"  # + voice name -> latest listen JSON
-K_CONTROL = "control"  # pub/sub; {"voices"|"senses"|"key": "changed"}
+K_CONTROL = "control"  # pub/sub; {"voices"|"senses"|"frame": "changed"}
 K_CADENCE = "cadence:running"  # set while a cadence is running (with a TTL)
 PAUSED_ROW = "paused"  # app_settings row: kept in PostgreSQL so it survives a Redis wipe
 
-KINDS = {"voice", "theme", "world", "cadence", "digest"}
-# Older names for a theme (the human's thought) and for its author.
-ALIASES = {"person": "theme", "conscious": "theme"}
+KINDS = {"voice", "conscious", "world", "cadence", "digest"}
+# Older names for a thought from the conscious part, and for its author.
+ALIASES = {"person": "conscious", "theme": "conscious"}
 AUTHOR_ALIASES = {"person": "conscious"}
 
 
-class Score:
+class Stream:
     def __init__(self, sessions: async_sessionmaker, redis: aioredis.Redis, window: int = 40,
                  namespace: str = "polyphony"):
         self.sessions = sessions

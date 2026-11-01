@@ -25,9 +25,9 @@ from ..config import get_settings
 settings = get_settings()
 mcp = FastMCP(
     "polyphony",
-    instructions=("The voices of one mind, with no chair. `say` drops a theme in; voices decide "
-                  "for themselves whether to answer, so read the score again after a while. "
-                  "Votes are called by the clerk on its own; their results appear in the score."),
+    instructions=("The voices of one mind, with no chair. `say` drops a thought in; voices decide "
+                  "for themselves whether to answer, so read the stream again after a while. "
+                  "Votes are called by the clerk on its own; their results appear in the stream."),
     host=settings.mcp_http_host,
     port=settings.mcp_http_port,
 )
@@ -41,13 +41,13 @@ def _client() -> httpx.AsyncClient:
 async def say(content: str) -> dict[str, Any]:
     """Drop a thought into the room as the human participant. Returns the recorded thought."""
     async with _client() as c:
-        r = await c.post("/thoughts", json={"content": content, "kind": "theme"})
+        r = await c.post("/thoughts", json={"content": content, "kind": "conscious"})
         r.raise_for_status()
         return r.json()
 
 
 @mcp.tool()
-async def read_score(after: int = 0, limit: int = 100) -> list[dict[str, Any]]:
+async def read_stream(after: int = 0, limit: int = 100) -> list[dict[str, Any]]:
     """Read thoughts with seq greater than `after`, oldest first (voices, world, cadences, digests)."""
     async with _client() as c:
         r = await c.get("/thoughts", params={"after": after, "limit": min(limit, 1000)})

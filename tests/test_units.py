@@ -93,14 +93,14 @@ def test_fingerprints_match_on_url_or_title():
 
 def test_render_marks_self_and_kinds():
     recent = [
-        {"seq": 1, "author": "conscious", "kind": "theme", "content": "hi", "mood": None},
+        {"seq": 1, "author": "conscious", "kind": "conscious", "content": "hi", "mood": None},
         {"seq": 2, "author": "rest", "kind": "voice", "content": "tired", "mood": "flat"},
     ]
     listens = {"rest": {"speak": False, "mood": "tired", "reason": "third loop", "trigger_seq": 2}}
     out = prompts.render(recent, [], listens, ["make"], "rest", voice_text="**Wants** — rest.")
-    assert "[1] [theme] conscious: hi" in out
-    assert "[2] rest (flat): tired" in out  # the score is the same for every voice
-    assert "rest (you): rest — tired (at [2])" in out
+    assert "[1] conscious: hi" in out
+    assert "[2] rest (flat): tired" in out  # the stream is the same for every voice
+    assert "rest (you): quiet — tired (at [2])" in out
     assert 'Your name is "rest"' in out.split(CACHE_BREAK)[1]
     assert "third loop" not in out
     assert "make" in out.split("## Forming a thought right now")[1]
@@ -109,16 +109,16 @@ def test_render_marks_self_and_kinds():
 def test_prompt_prefix_is_shared_across_voices():
     from datetime import datetime, timezone
 
-    from polyphony.key import Key
+    from polyphony.frame import Frame
 
-    k = Key(text="A key.")
+    k = Frame(text="A key.")
     assert "A key." in prompts.listen_system(k) and "only listening" in prompts.listen_system(k)
     now = datetime.now(timezone.utc).isoformat()
     recent = [{"seq": i, "author": "a", "kind": "voice", "content": str(i), "mood": None,
                "created_at": now} for i in range(1, 6)]
     a = prompts.render(recent, [], {}, [], "rest", voice_text="**Wants** — rest.")
     b = prompts.render(recent, [], {}, ["rest"], "make", voice_text="**Wants** — ship.")
-    # system and score are identical for every voice; only what follows the break differs
+    # system and stream are identical for every voice; only what follows the break differs
     assert a.split(CACHE_BREAK)[0] == b.split(CACHE_BREAK)[0]
     assert a.split(CACHE_BREAK)[1] != b.split(CACHE_BREAK)[1]
 

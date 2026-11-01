@@ -35,8 +35,8 @@ from .cadence import (
 )
 from .config import Settings
 from .db import Cadence
-from .key import get_key
-from .score import Score
+from .frame import get_frame
+from .stream import Stream
 from .voice import load_voice_specs
 
 log = logging.getLogger(__name__)
@@ -90,14 +90,14 @@ def _config(cadence_id: int) -> dict[str, Any]:
     return {"configurable": {"thread_id": f"cadence-{cadence_id}"}}
 
 
-def build(score: Score, settings: Settings):
+def build(stream: Stream, settings: Settings):
     async def standing(state: CadenceState) -> CadenceState:
-        key = await get_key(score.sessions)
-        specs = await load_voice_specs(score.sessions, settings)
+        frame = await get_frame(stream.sessions)
+        specs = await load_voice_specs(stream.sessions, settings)
         names = [s.name for s in specs]
         answers = await asyncio.gather(*[
-            ask(score, settings, key, s, "listen",
-                prompts.standing_system(key, state["question"], state["options"], names),
+            ask(stream, settings, frame, s, "listen",
+                prompts.standing_system(frame, state["question"], state["options"], names),
                 "standing")
             for s in specs
         ])
@@ -105,17 +105,17 @@ def build(score: Score, settings: Settings):
 
     async def weights(state: CadenceState) -> CadenceState:
         w = average_weights(state["names"], list(state["proposals"].values()))
-        await set_fields(score, state["cadence_id"],
+        await set_fields(stream, state["cadence_id"],
                          weights={"final": w, "proposals": state["proposals"]})
         return {"weights": w}
 
     async def vote(state: CadenceState) -> CadenceState:
-        key = await get_key(score.sessions)
-        specs = [s for s in await load_voice_specs(score.sessions, settings)
+        frame = await get_frame(stream.sessions)
+        specs = [s for s in await load_voice_specs(stream.sessions, settings)
                  if s.name in state["names"]]
         answers = await asyncio.gather(*[
-            ask(score, settings, key, s, "listen",
-                prompts.vote_system(key, state["question"], state["options"], state["weights"]),
+            ask(stream, settings, frame, s, "listen",
+                prompts.vote_system(frame, state["question"], state["options"], state["weights"]),
                 "vote")
             for s in specs
         ])
@@ -126,20 +126,20 @@ def build(score: Score, settings: Settings):
 
     async def count(state: CadenceState) -> CadenceState:
         result = tally(state["weights"], state["votes"], state["options"])
-        await set_fields(score, state["cadence_id"], votes=state["votes"], result=result)
+        await set_fields(stream, state["cadence_id"], votes=state["votes"], result=result)
         return {"result": result}
 
     async def record(state: CadenceState) -> CadenceState:
         cid = state["cadence_id"]
-        await set_fields(score, cid, status="resolved", resolved_at=datetime.now(timezone.utc))
-        await score.set_cadence_running(cid, False)
+        await set_fields(stream, cid, status="resolved", resolved_at=datetime.now(timezone.utc))
+        await stream.set_cadence_running(cid, False)
         content = summarize(state["question"], state["options"], state["weights"],
                             state["votes"], state["result"])
         meta = {"cadence_id": cid, "question": state["question"], "options": state["options"],
                 "called_by": state["called_by"], "weights": state["weights"],
                 "votes": state["votes"], "result": state["result"]}
         # Appended after the running flag is cleared, so this thought wakes the voices.
-        await score.append("cadence", "cadence", content, meta=meta)
+        await stream.append("cadence", "cadence", content, meta=meta)
         return {"recorded": True}
 
     g = StateGraph(CadenceState)
@@ -155,53 +155,53 @@ def build(score: Score, settings: Settings):
     return g.compile(checkpointer=_checkpointer)
 
 
-async def _empty(score: Score, settings: Settings, cadence_id: int) -> bool:
-    if await load_voice_specs(score.sessions, settings):
+async def _empty(stream: Stream, settings: Settings, cadence_id: int) -> bool:
+    if await load_voice_specs(stream.sessions, settings):
         return False
     result = {"shares": [], "winner": None, "decided": False}
-    await set_fields(score, cadence_id, status="resolved", weights={}, votes={}, result=result,
+    await set_fields(stream, cadence_id, status="resolved", weights={}, votes={}, result=result,
                      resolved_at=datetime.now(timezone.utc))
     return True
 
 
-async def start(score: Score, settings: Settings, cadence_id: int, question: str,
+async def start(stream: Stream, settings: Settings, cadence_id: int, question: str,
                 options: list[str], called_by: str) -> None:
-    if await _empty(score, settings, cadence_id):
+    if await _empty(stream, settings, cadence_id):
         return
-    await score.set_cadence_running(cadence_id, True)
+    await stream.set_cadence_running(cadence_id, True)
     try:
-        await build(score, settings).ainvoke(
+        await build(stream, settings).ainvoke(
             {"cadence_id": cadence_id, "question": question, "options": options,
              "called_by": called_by},
             _config(cadence_id),
         )
     finally:
-        c = await get_cadence(score, cadence_id)
+        c = await get_cadence(stream, cadence_id)
         if c and c["status"] != "running":
-            await score.set_cadence_running(cadence_id, False)
+            await stream.set_cadence_running(cadence_id, False)
 
 
-async def resume(score: Score, settings: Settings, cadence_id: int) -> None:
+async def resume(stream: Stream, settings: Settings, cadence_id: int) -> None:
     """Continue a cadence from its last checkpoint, after a crash or restart."""
-    graph = build(score, settings)
+    graph = build(stream, settings)
     snap = await graph.aget_state(_config(cadence_id))
     if not snap or not snap.next:
         return
-    await set_fields(score, cadence_id, status="running")
-    await score.set_cadence_running(cadence_id, True)
+    await set_fields(stream, cadence_id, status="running")
+    await stream.set_cadence_running(cadence_id, True)
     try:
         await graph.ainvoke(None, _config(cadence_id))
     finally:
-        await score.set_cadence_running(cadence_id, False)
+        await stream.set_cadence_running(cadence_id, False)
 
 
-async def resume_unfinished(score: Score, settings: Settings) -> None:
+async def resume_unfinished(stream: Stream, settings: Settings) -> None:
     """On startup: continue every cadence a crash left in `running`."""
-    async with score.sessions() as s:
+    async with stream.sessions() as s:
         ids = (await s.scalars(select(Cadence.id).where(Cadence.status == "running"))).all()
     for cid in ids:
         log.info("resuming cadence %s", cid)
         try:
-            await resume(score, settings, cid)
+            await resume(stream, settings, cid)
         except Exception:
             log.exception("could not resume cadence %s", cid)

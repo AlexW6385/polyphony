@@ -16,8 +16,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 log = logging.getLogger(__name__)
 
 STEPS: list[tuple[str, str]] = [
-    ("theme kind",
-     "UPDATE thoughts SET kind = 'theme' WHERE kind IN ('person', 'conscious')"),
+    ("conscious kind",
+     "UPDATE thoughts SET kind = 'conscious' WHERE kind IN ('person', 'theme')"),
     ("conscious author", "UPDATE thoughts SET author = 'conscious' WHERE author = 'person'"),
     ("senses.feeds",
      "ALTER TABLE senses ADD COLUMN IF NOT EXISTS feeds JSONB NOT NULL DEFAULT '[]'"),
@@ -31,7 +31,7 @@ STEPS: list[tuple[str, str]] = [
     ("senses.every_minutes", "ALTER TABLE senses DROP COLUMN IF EXISTS every_minutes"),
     ("cadences.options",
      "ALTER TABLE cadences ADD COLUMN IF NOT EXISTS options JSONB NOT NULL DEFAULT '[]'"),
-    ("drop frames (now keys, reseeded from mind/key.md)", "DROP TABLE IF EXISTS frames"),
+    ("drop keys (now frames, reseeded from mind/frame.md)", "DROP TABLE IF EXISTS keys"),
 ]
 
 

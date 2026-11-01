@@ -96,8 +96,8 @@ class Settings(BaseSettings):
         return self.mind_dir / "senses.yaml"
 
     @property
-    def key_file(self) -> Path:
-        return self.mind_dir / "key.md"
+    def frame_file(self) -> Path:
+        return self.mind_dir / "frame.md"
 
     # ------------------------------------------------------------------ tiers
 

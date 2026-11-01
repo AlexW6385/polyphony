@@ -4,7 +4,7 @@
     round 2 vote:     every voice says which options it supports (any number), weighted
     -> each option's weighted support; the top one wins if it has more than half and is
        strictly ahead of the next, otherwise the question stays open
-    -> a `cadence` thought in the score with the full result
+    -> a `cadence` thought in the stream with the full result
 
 The procedure itself runs as a LangGraph workflow (cadence_graph.py) with a
 checkpointer, so an interrupted cadence resumes from its last finished step.
@@ -19,25 +19,25 @@ from typing import Any
 from . import llm, prompts
 from .config import Settings
 from .db import Cadence
-from .score import Score
-from .key import Key
+from .stream import Stream
+from .frame import Frame
 from .voice import VoiceSpec
 
 log = logging.getLogger(__name__)
 
 
-async def _context(score: Score, settings: Settings, spec: VoiceSpec) -> str:
-    recent = prompts.cache_window(await score.recent())
-    return prompts.render(recent, [], await score.listens_latest(), await score.forming(),
+async def _context(stream: Stream, settings: Settings, spec: VoiceSpec) -> str:
+    recent = prompts.cache_window(await stream.recent())
+    return prompts.render(recent, [], await stream.listens_latest(), await stream.forming(),
                           spec.name, voice_text=spec.text, tz=settings.timezone)
 
 
-async def ask(score: Score, settings: Settings, key: Key, spec: VoiceSpec, tier_name: str,
+async def ask(stream: Stream, settings: Settings, frame: Frame, spec: VoiceSpec, tier_name: str,
               system: str, purpose: str) -> dict[str, Any] | None:
     base = settings.listen_tier if tier_name == "listen" else settings.speak_tier
     tier = llm.resolve_tier(base, spec.overrides.get(tier_name))
     try:
-        return await llm.complete_json(tier, system, await _context(score, settings, spec),
+        return await llm.complete_json(tier, system, await _context(stream, settings, spec),
                                        temperature=0.5, tier_name=tier_name, purpose=purpose,
                                        voice=spec.name)
     except Exception:
@@ -45,23 +45,23 @@ async def ask(score: Score, settings: Settings, key: Key, spec: VoiceSpec, tier_
         return None
 
 
-async def set_fields(score: Score, cadence_id: int, **fields) -> None:
-    async with score.sessions() as s:
+async def set_fields(stream: Stream, cadence_id: int, **fields) -> None:
+    async with stream.sessions() as s:
         row = await s.get(Cadence, cadence_id)
         for k, v in fields.items():
             setattr(row, k, v)
         await s.commit()
 
 
-async def get_cadence(score: Score, cadence_id: int) -> dict[str, Any] | None:
-    async with score.sessions() as s:
+async def get_cadence(stream: Stream, cadence_id: int) -> dict[str, Any] | None:
+    async with stream.sessions() as s:
         row = await s.get(Cadence, cadence_id)
         return row.to_dict() if row else None
 
 
-async def create_cadence(score: Score, question: str, options: list[str], called_by: str,
+async def create_cadence(stream: Stream, question: str, options: list[str], called_by: str,
                          status: str) -> int:
-    async with score.sessions() as s:
+    async with stream.sessions() as s:
         row = Cadence(resolution=question, options=options, proposed_by=called_by,
                       status=status)
         s.add(row)
@@ -161,15 +161,15 @@ def summarize(question: str, options: list[str], weights: dict[str, float],
 # --------------------------------------------------------------------------- procedures
 
 
-async def run_cadence(score: Score, settings: Settings, question: str, options: list[str],
+async def run_cadence(stream: Stream, settings: Settings, question: str, options: list[str],
                       called_by: str = "clerk") -> dict:
     """Run both rounds through the workflow and record the result. The caller holds the slot."""
     from . import cadence_graph
 
     cadence_id = None
     try:
-        cadence_id = await create_cadence(score, question, options, called_by, "running")
-        await cadence_graph.start(score, settings, cadence_id, question, options, called_by)
+        cadence_id = await create_cadence(stream, question, options, called_by, "running")
+        await cadence_graph.start(stream, settings, cadence_id, question, options, called_by)
     finally:
-        await score.release_cadence()
-    return await get_cadence(score, cadence_id)
+        await stream.release_cadence()
+    return await get_cadence(stream, cadence_id)

@@ -158,10 +158,10 @@ class SenseLog(Base):
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
-class KeyRow(Base):
+class FrameRow(Base):
     """What this mind is (the key). A single row."""
 
-    __tablename__ = "keys"
+    __tablename__ = "frames"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     text: Mapped[str] = mapped_column(Text)

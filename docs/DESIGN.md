@@ -6,36 +6,38 @@
 
 Polyphony is now one thing: the inner voices of one mind discussing what the conscious part
 brings in. The general "polyphony of anything" engine described in the v1 sections below was
-narrowed to that, and its words were changed to one consistent, lightly musical set.
+narrowed to that. Its words are the plain words of that scene, so that both the person and the
+models read them without translation (a lightly musical set, score/key/theme/rest, was tried
+and dropped; cadence stayed).
 
 **Words** (code, API and page use the same ones):
 
-| now | was | meaning |
+| word | in code | meaning |
 |---|---|---|
-| **score** (`Score`, `score.py`, `GET /score`) | stream | the one shared, ordered record of thoughts |
-| **key** (`Key`, `key.py`, `keys` table, `GET/PUT /key`, `mind/key.md`) | frame | what this mind is and how its voices relate; first in every prompt |
-| **theme** (thought kind `theme`, author `conscious`) | person / conscious thought | what the conscious part drops in |
-| **rest** | quiet | a listen that chooses not to speak |
-| voice, listen, speak, cadence, digest, sense | unchanged | |
+| **stream** | `Stream`, `stream.py`, `GET /stream` | the one shared, ordered record of thoughts |
+| **frame** | `Frame`, `frame.py`, `frames` table, `GET /frame`, `mind/frame.md` | what this mind is and how its voices relate; first in every prompt |
+| **conscious** | thought kind and author `conscious`; **Think** on the page | the person, the conscious part of the mind |
+| **quiet** | a listen with `speak: false` | a voice that chooses not to speak |
+| voice, listen, speak, cadence, clerk, digest, sense | unchanged | |
 
-**Removed:** ensembles (one set of key, voices and senses under `mind/`; the `ENSEMBLE`
+**Removed:** ensembles (one set of frame, voices and senses under `mind/`; the `ENSEMBLE`
 setting and the `council` and `public` examples are gone; the human is always `conscious`);
 memory (embeddings, pgvector retrieval, `/memories`); the waker (no voice is woken after
-quiet: a quiet score is the end of a discussion); `ENABLED_VOICES` (voices are switched on and
+quiet: a quiet stream is the end of a discussion); `ENABLED_VOICES` (voices are switched on and
 off on the page); local models altogether (listen is `claude-haiku-5-5`, speak
 `claude-sonnet-5-5`; the Ollama provider, the shadow teacher, `listen_samples`, the simulator
 and the distillation notebook are gone: listen is about 6% of the cost, so a local student
 would save little). Strays (a few random older thoughts) remain.
 
-**The key is part of the mechanism.** It is copied from `mind/key.md` on every start and is
-neither shown nor editable on the page (`GET /key` only).
+**The frame is part of the mechanism.** It is copied from `mind/frame.md` on every start and is
+neither shown nor editable on the page (`GET /frame` only).
 
 **Settings:** one provider, one API key, a listen model and a speak model, on the settings
 page; the senses follow speak; the cadence rounds (proposal, standing, vote) run on the listen
 model; timings are fixed (digest after 90 s of quiet).
 
-**Prompt caching.** The system prompt is the key and the engine text only (plus, for a cadence,
-the resolution), so it is the same for every voice. The user message starts with the score,
+**Prompt caching.** The system prompt is the frame and the engine text only (plus, for a cadence,
+the resolution), so it is the same for every voice. The user message starts with the stream,
 also the same for every voice, with absolute times and one cache block per thought; the
 window shows 40 to 59 thoughts and its start moves in steps of 20, so a new thought appends to
 the cached prefix instead of changing it. After a cache break come the voice's text, the time
@@ -62,11 +64,10 @@ yes/no "worth deciding now?" round and the confirm step are gone, as are `POST /
 `POST /digest`.
 
 **Structured digest and vote cards.** The digest model answers in JSON (decided, outcome,
-question, one line per voice's position, what is still open); the score keeps a plain-text form
+question, one line per voice's position, what is still open); the stream keeps a plain-text form
 for the voices to read and the page draws a card from the JSON. A vote card shows the question,
 each option with its weighted share and how many voices backed it, the result, then every
-voice's weight, choice and reason. On the page the human's input is labelled **Think** (the
-thought kind is still `theme` in code and API).
+voice's weight, choice and reason. On the page the person types under **Think**.
 
 **Listen stagger.** After a new thought each voice waits a random 0 to 8 seconds before it
 listens, so the voices that listen later see what the first ones said instead of all saying

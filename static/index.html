@@ -8,14 +8,14 @@
   :root {
     --bg: #f6f4ef; --panel: #fffdf8; --ink: #22201c; --muted: #7a756b; --line: #e3ddd0;
     --accent: #3b5bdb; --conscious: #b8860b; --world: #2b8a3e; --cadence: #862e9c; --digest: #0b7285;
-    --rest: #adb5bd; --speak: #3b5bdb;
+    --quiet: #adb5bd; --speak: #3b5bdb;
     --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
     --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   }
   @media (prefers-color-scheme: dark) {
     :root { --bg: #16161a; --panel: #1e1e23; --ink: #e9e6df; --muted: #8e8a82; --line: #2e2e35;
             --accent: #748ffc; --conscious: #f2c94c; --world: #69db7c; --cadence: #da77f2; --digest: #66d9e8;
-            --rest: #5c636a; --speak: #748ffc; }
+            --quiet: #5c636a; --speak: #748ffc; }
   }
   * { box-sizing: border-box; }
   /* The page itself never scrolls; each column scrolls on its own. */
@@ -54,13 +54,13 @@
   .small { font-size: 12px; color: var(--muted); }
   details summary { cursor: pointer; color: var(--muted); font-size: 12px; margin: 4px 0; }
 
-  #score { max-width: 760px; margin: 0 auto; }
+  #stream { max-width: 760px; margin: 0 auto; }
   .thought { padding: 10px 0 12px; border-bottom: 1px dashed var(--line); }
   .thought .meta { font-size: 12px; color: var(--muted); display: flex; gap: 8px; }
   .thought .who { font-weight: 600; color: var(--ink); }
   .thought .body { white-space: pre-wrap; margin-top: 2px; }
-  .thought.theme .who { color: var(--conscious); }
-  .thought.theme .body { font-weight: 500; }
+  .thought.conscious .who { color: var(--conscious); }
+  .thought.conscious .body { font-weight: 500; }
   .thought.digest { margin: 10px 0; }
   .vote.digest-card { border-color: var(--digest); }
   .vote.digest-card .result.decided { border-left-color: var(--digest); }
@@ -91,7 +91,7 @@
 
   .listen { display: grid; grid-template-columns: 10px 1fr; gap: 8px; padding: 6px 0;
             border-bottom: 1px dashed var(--line); }
-  .dot { width: 10px; height: 10px; border-radius: 50%; margin-top: 5px; background: var(--rest); }
+  .dot { width: 10px; height: 10px; border-radius: 50%; margin-top: 5px; background: var(--quiet); }
   .dot.speak { background: var(--speak); }
   .dot.forming { background: var(--speak); animation: pulse 1s infinite; }
   @keyframes pulse { 50% { opacity: .3; } }
@@ -115,8 +115,8 @@
   <section id="side">
     <div class="block">
       <h2>Think</h2>
-      <form id="theme-form">
-        <textarea id="theme" placeholder="What's on your mind…"></textarea>
+      <form id="think-form">
+        <textarea id="think" placeholder="What's on your mind…"></textarea>
         <div class="row"><button class="primary">Think</button>
           <span class="small">⌘/Ctrl+Enter</span></div>
       </form>
@@ -152,7 +152,7 @@
     </div>
   </section>
 
-  <section><div id="score"><p class="empty" id="empty">The score is empty. Think something.</p></div></section>
+  <section><div id="stream"><p class="empty" id="empty">The stream is empty. Think something.</p></div></section>
 
   <section>
     <h2>Listening</h2>
@@ -172,7 +172,7 @@ const api = async (method, path, body) => {
 };
 const time = (iso) => iso ? new Date(iso).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"}) : "";
 
-// ---------------------------------------------------------------- score
+// ---------------------------------------------------------------- stream
 let lastSeq = 0;
 const seen = new Set();
 
@@ -217,11 +217,11 @@ function digestHtml(t) {
   </div>`;
 }
 
-// Follow new thoughts only while the reader is at the bottom of the score; if they have
+// Follow new thoughts only while the reader is at the bottom of the stream; if they have
 // scrolled up to read, stay where they are.
-const scoreScroller = () => $("#score").parentElement;
+const streamScroller = () => $("#stream").parentElement;
 const nearBottom = (el) => el.scrollHeight - el.scrollTop - el.clientHeight < 60;
-let followScore = true;
+let followStream = true;
 
 function addThought(t) {
   if (seen.has(t.seq)) return;
@@ -231,18 +231,18 @@ function addThought(t) {
   const div = document.createElement("div");
   div.className = `thought ${t.kind}`;
   const url = t.meta && t.meta.url ? ` · <a href="${esc(t.meta.url)}" target="_blank" rel="noopener">source</a>` : "";
-  const human = t.kind === "theme";
+  const human = t.kind === "conscious";
   const kindTag = t.kind === "voice" || human ? "" : `<span>[${t.kind}]</span>`;
   div.innerHTML = `<div class="meta"><span>#${t.seq}</span><span class="who">${esc(human ? "conscious" : t.author)}</span>
       ${kindTag}${t.mood ? `<span>(${esc(t.mood)})</span>` : ""}<span>${time(t.created_at)}</span>${url}</div>` +
     (t.kind === "cadence" ? cadenceHtml(t) : t.kind === "digest" ? digestHtml(t)
       : `<div class="body">${esc(t.content)}</div>`);
   // keep order of record even if events arrive out of order
-  const score = $("#score");
-  const after = [...score.children].find(c => +c.dataset.seq > t.seq);
+  const stream = $("#stream");
+  const after = [...stream.children].find(c => +c.dataset.seq > t.seq);
   div.dataset.seq = t.seq;
-  score.insertBefore(div, after || null);
-  if (!after && followScore) { const el = scoreScroller(); el.scrollTop = el.scrollHeight; }
+  stream.insertBefore(div, after || null);
+  if (!after && followStream) { const el = streamScroller(); el.scrollTop = el.scrollHeight; }
 }
 
 async function loadHistory() {
@@ -253,10 +253,10 @@ async function loadHistory() {
   } while (batch.length === 500);
 }
 
-scoreScroller().addEventListener("scroll", () => { followScore = nearBottom(scoreScroller()); });
+streamScroller().addEventListener("scroll", () => { followStream = nearBottom(streamScroller()); });
 
 function connect() {
-  const es = new EventSource(`/score?after=${lastSeq}`);
+  const es = new EventSource(`/stream?after=${lastSeq}`);
   es.onmessage = (e) => addThought(JSON.parse(e.data));
   es.onopen = () => $("#status").textContent = "live";
   es.onerror = () => { $("#status").textContent = "reconnecting…"; es.close(); setTimeout(connect, 2000); };
@@ -269,7 +269,7 @@ function renderListens() {
   $("#listens").innerHTML = voices.filter(v => v.enabled).map(v => {
     const l = v.last_listen;
     const cls = v.forming ? "forming" : (l && l.speak ? "speak" : "");
-    const state = v.forming ? "forming…" : (l ? (l.speak ? "spoke" : "rest") : "not yet");
+    const state = v.forming ? "forming…" : (l ? (l.speak ? "spoke" : "quiet") : "not yet");
     return `<div class="listen"><div class="dot ${cls}"></div><div>
       <b>${esc(v.name)}</b> <span class="small">${state}${l ? " · " + esc(l.mood) + " · at #" + l.trigger_seq : ""}</span>
       ${l ? `<div class="reason">${esc(l.reason)}</div>` : ""}</div></div>`;
@@ -369,14 +369,14 @@ $("#sense-form").addEventListener("submit", async (e) => {
   e.target.reset(); refreshSenses();
 });
 
-// ---------------------------------------------------------------- theme
-$("#theme-form").addEventListener("submit", async (e) => {
+// ---------------------------------------------------------------- think
+$("#think-form").addEventListener("submit", async (e) => {
   e.preventDefault();
-  const content = $("#theme").value.trim(); if (!content) return;
-  await api("POST", "/thoughts", {content}); $("#theme").value = "";
+  const content = $("#think").value.trim(); if (!content) return;
+  await api("POST", "/thoughts", {content}); $("#think").value = "";
 });
-$("#theme").addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) $("#theme-form").requestSubmit();
+$("#think").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) $("#think-form").requestSubmit();
 });
 
 // ---------------------------------------------------------------- pause

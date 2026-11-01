@@ -1,13 +1,13 @@
 """The clerk: decides when to settle something by a vote, and what the options are.
 
-An edge component like the digest, never a voice: it does not speak in the score. It looks
-at the discussion every `CHECK_EVERY` new thoughts, and once when the score has been quiet
+An edge component like the digest, never a voice: it does not speak in the stream. It looks
+at the discussion every `CHECK_EVERY` new thoughts, and once when the stream has been quiet
 for `QUIET_SECONDS` after something new was said. Each check is one model call that reads
-the score and answers whether a vote is due and, if so, the question and its options (at
+the stream and answers whether a vote is due and, if so, the question and its options (at
 least two) drawn from the discussion. The prompt depends on why it is looking: mid-discussion
-it only calls a vote that is clearly due; after the score has gone quiet the discussion is
+it only calls a vote that is clearly due; after the stream has gone quiet the discussion is
 over, so it calls one unless there is truly nothing to decide. A vote it calls runs as a
-cadence (cadence.py) and its result lands in the score; voices treat a decided cadence as
+cadence (cadence.py) and its result lands in the stream; voices treat a decided cadence as
 settled.
 
 Only one cadence runs at a time, through the same slot as before, so a check that finds a
@@ -24,28 +24,28 @@ from . import llm, prompts
 from .cadence import run_cadence
 from .config import Settings
 from .digest import quiet_for
-from .key import get_key
-from .score import Score
+from .frame import get_frame
+from .stream import Stream
 
 log = logging.getLogger(__name__)
 
 CHECK_EVERY = 15  # new thoughts since the last check
 QUIET_SECONDS = 30.0  # quiet this long after something new -> check once
 TICK_SECONDS = 3.0
-TALK = {"voice", "theme", "world"}  # what counts as discussion (not votes or digests)
+TALK = {"voice", "conscious", "world"}  # what counts as discussion (not votes or digests)
 
 
 class Clerk:
-    def __init__(self, score: Score, settings: Settings):
-        self.score = score
+    def __init__(self, stream: Stream, settings: Settings):
+        self.stream = stream
         self.settings = settings
         self._checked_seq: int | None = None  # last thought already looked at
 
     async def tick(self) -> bool:
         """Check the discussion if it is due. Returns True if a check ran."""
-        if await self.score.cadence_running():
+        if await self.stream.cadence_running():
             return False
-        talk = [t for t in await self.score.recent() if t["kind"] in TALK]
+        talk = [t for t in await self.stream.recent() if t["kind"] in TALK]
         if not talk:
             return False
         last = talk[-1]["seq"]
@@ -57,7 +57,7 @@ class Clerk:
             return False
         when = "count" if len(new) >= CHECK_EVERY else None
         if when is None and any(t["kind"] == "voice" for t in new):
-            q = await quiet_for(self.score)
+            q = await quiet_for(self.stream)
             if q is not None and q[0] >= QUIET_SECONDS:
                 when = "quiet"
         if when is None:
@@ -72,10 +72,10 @@ class Clerk:
         `when` is "count" (every CHECK_EVERY thoughts, mid-discussion) or "quiet" (the
         discussion is over).
         """
-        key = await get_key(self.score.sessions)
-        recent = prompts.cache_window(await self.score.recent())
+        frame = await get_frame(self.stream.sessions)
+        recent = prompts.cache_window(await self.stream.recent())
         user = prompts.render(recent, [], {}, [], None, tz=self.settings.timezone)
-        reply = await llm.complete_json(self.settings.speak_tier, prompts.clerk_system(key, when),
+        reply = await llm.complete_json(self.settings.speak_tier, prompts.clerk_system(frame, when),
                                         user, schema=prompts.CLERK_SCHEMA, temperature=0.2,
                                         tier_name="speak", purpose="clerk")
         question = str(reply.get("question") or "").strip()
@@ -83,10 +83,10 @@ class Clerk:
         if not reply.get("call_vote") or not question or len(options) < 2:
             log.info("clerk (%s): no vote now", when)
             return None
-        if not await self.score.claim_cadence():
+        if not await self.stream.claim_cadence():
             return None
         log.info("clerk (%s): vote on %r with %d options", when, question, len(options))
-        return await run_cadence(self.score, self.settings, question, options)
+        return await run_cadence(self.stream, self.settings, question, options)
 
     async def run(self) -> None:
         while True:

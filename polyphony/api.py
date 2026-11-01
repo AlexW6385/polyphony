@@ -1,4 +1,4 @@
-"""HTTP API: feed the room, read the record, watch it live, manage key, voices and senses."""
+"""HTTP API: feed the room, read the record, watch it live, manage voices and senses."""
 
 from __future__ import annotations
 
@@ -19,10 +19,10 @@ from . import digest as digest_mod
 from . import llm, runtime_config
 from .cadence import get_cadence
 from .config import Settings
-from .db import KeyRow, LLMCall, SenseRow, VoiceRow
-from .key import CONSCIOUS, get_key
+from .db import FrameRow, LLMCall, SenseRow, VoiceRow
+from .frame import CONSCIOUS, get_frame
 from .sense import DEFAULT_DAILY_AT, Sense, SenseSpec, check_daily_at
-from .score import Score
+from .stream import Stream
 from .voice import VoiceSpec
 
 log = logging.getLogger(__name__)
@@ -35,7 +35,7 @@ HEARTBEAT_SECONDS = 15
 class ThoughtIn(BaseModel):
     content: str = Field(min_length=1)
     author: str = CONSCIOUS
-    kind: str = "theme"  # "person" and "conscious" are accepted as older names
+    kind: str = "conscious"  # "person" and "theme" are accepted as older names
 
 
 class VoiceIn(BaseModel):
@@ -91,7 +91,7 @@ def _split_voice_text(text: str, overrides: dict[str, Any] | None) -> tuple[str,
     return body, {**meta, **(overrides or {})}
 
 
-def create_app(score: Score, settings: Settings, lifespan=None) -> FastAPI:
+def create_app(stream: Stream, settings: Settings, lifespan=None) -> FastAPI:
     app = FastAPI(title="Polyphony", version="1.0.0", lifespan=lifespan)
     background: set[asyncio.Task] = set()
 
@@ -104,26 +104,26 @@ def create_app(score: Score, settings: Settings, lifespan=None) -> FastAPI:
 
     @app.get("/health")
     async def health():
-        await score.redis.ping()
+        await stream.redis.ping()
         return {"ok": True}
 
     # ------------------------------------------------------------------ pause
 
     @app.get("/pause")
     async def get_pause():
-        return {"paused": await score.paused()}
+        return {"paused": await stream.paused()}
 
     @app.post("/pause")
     async def post_pause():
         """Stop everything that calls a model: voices, senses, digest, clerk and votes."""
-        await score.set_paused(True)
+        await stream.set_paused(True)
         for t in list(background):
             t.cancel()
         return {"paused": True}
 
     @app.post("/resume")
     async def post_resume():
-        await score.set_paused(False)
+        await stream.set_paused(False)
         return {"paused": False}
 
     # ------------------------------------------------------------------ settings page
@@ -135,18 +135,18 @@ def create_app(score: Score, settings: Settings, lifespan=None) -> FastAPI:
     @app.get("/config")
     async def get_config():
         """Provider, models, and whether a key is set. Never returns the key."""
-        return runtime_config.view(settings, await runtime_config.load(score.sessions))
+        return runtime_config.view(settings, await runtime_config.load(stream.sessions))
 
     @app.put("/config")
     async def put_config(patch: dict[str, Any]):
-        data = await runtime_config.load(score.sessions)
+        data = await runtime_config.load(stream.sessions)
         try:
             data = runtime_config.merge(data, patch)
         except (ValueError, TypeError, AttributeError) as e:
             raise HTTPException(422, str(e))
-        await runtime_config.save(score.sessions, data)
+        await runtime_config.save(stream.sessions, data)
         runtime_config.apply(settings, data)
-        await score.publish_control("config")  # voices restart on the new models
+        await stream.publish_control("config")  # voices restart on the new models
         return runtime_config.view(settings, data)
 
     @app.post("/config/test/{tier}")
@@ -166,7 +166,7 @@ def create_app(score: Score, settings: Settings, lifespan=None) -> FastAPI:
                 "ms": round((loop.time() - start) * 1000)}
 
     async def refuse_if_paused() -> None:
-        if await score.paused():
+        if await stream.paused():
             raise HTTPException(409, "paused: resume first")
 
     @app.get("/")
@@ -177,30 +177,30 @@ def create_app(score: Score, settings: Settings, lifespan=None) -> FastAPI:
 
     @app.post("/thoughts")
     async def post_thought(t: ThoughtIn):
-        kind = "theme" if t.kind in ("person", "conscious") else t.kind
-        if kind not in ("theme", "world"):
-            raise HTTPException(422, "kind must be 'theme' or 'world'")
-        author = CONSCIOUS if kind == "theme" else (t.author or "world")
-        return await score.append(author, kind, t.content.strip())
+        kind = "conscious" if t.kind in ("person", "theme") else t.kind
+        if kind not in ("conscious", "world"):
+            raise HTTPException(422, "kind must be 'conscious' or 'world'")
+        author = CONSCIOUS if kind == "conscious" else (t.author or "world")
+        return await stream.append(author, kind, t.content.strip())
 
     @app.get("/thoughts")
     async def get_thoughts(after: int = 0, limit: int = Query(200, ge=1, le=1000)):
-        return await score.thoughts(after=after, limit=limit)
+        return await stream.thoughts(after=after, limit=limit)
 
-    @app.get("/score")
+    @app.get("/stream")
     async def sse(after: int | None = None, last_event_id: str | None = Header(None)):
         if after is None and last_event_id and last_event_id.isdigit():
             after = int(last_event_id)
 
         async def events():
             ready = asyncio.Event()
-            sub = score.subscribe(ready=ready)
+            sub = stream.subscribe(ready=ready)
             live = asyncio.create_task(anext(sub))
             await ready.wait()  # subscribed before replaying: nothing falls in the gap
             last = 0
             try:
                 if after is not None:
-                    for t in await score.thoughts(after=after, limit=1000):
+                    for t in await stream.thoughts(after=after, limit=1000):
                         last = t["seq"]
                         yield f"id: {t['seq']}\ndata: {json.dumps(t)}\n\n"
                 while True:
@@ -226,13 +226,13 @@ def create_app(score: Score, settings: Settings, lifespan=None) -> FastAPI:
 
     @app.get("/listens")
     async def get_listens(limit: int = Query(100, ge=1, le=1000)):
-        return await score.listens(limit=limit)
+        return await stream.listens(limit=limit)
 
     # ------------------------------------------------------------------ cadence
 
     @app.get("/cadence/{cid}")
     async def get_one_cadence(cid: int):
-        c = await get_cadence(score, cid)
+        c = await get_cadence(stream, cid)
         if c is None:
             raise HTTPException(404, "no such cadence")
         return c
@@ -241,10 +241,10 @@ def create_app(score: Score, settings: Settings, lifespan=None) -> FastAPI:
 
     @app.get("/voices")
     async def list_voices():
-        async with score.sessions() as s:
+        async with stream.sessions() as s:
             rows = (await s.scalars(select(VoiceRow).order_by(VoiceRow.name))).all()
-        forming = set(await score.forming())
-        latest = await score.listens_latest()
+        forming = set(await stream.forming())
+        latest = await stream.listens_latest()
         return [
             {"name": r.name, "text": r.text, "overrides": r.overrides or {}, "enabled": r.enabled,
              "forming": r.name in forming, "last_listen": latest.get(r.name)}
@@ -255,17 +255,17 @@ def create_app(score: Score, settings: Settings, lifespan=None) -> FastAPI:
     async def add_voice(v: VoiceIn):
         _check_name(v.name)
         text, overrides = _split_voice_text(v.text, v.overrides)
-        async with score.sessions() as s:
+        async with stream.sessions() as s:
             if await s.get(VoiceRow, v.name):
                 raise HTTPException(409, "a voice with that name exists")
             s.add(VoiceRow(name=v.name, text=text, overrides=overrides or None, enabled=True))
             await s.commit()
-        await score.publish_control("voices")
+        await stream.publish_control("voices")
         return {"name": v.name, "text": text, "overrides": overrides, "enabled": True}
 
     @app.put("/voices/{name}")
     async def edit_voice(name: str, v: VoicePatch):
-        async with score.sessions() as s:
+        async with stream.sessions() as s:
             row = await s.get(VoiceRow, name)
             if row is None:
                 raise HTTPException(404, "no such voice")
@@ -281,39 +281,39 @@ def create_app(score: Score, settings: Settings, lifespan=None) -> FastAPI:
             out = {"name": row.name, "text": row.text, "overrides": row.overrides or {},
                    "enabled": row.enabled}
         if v.enabled is False:
-            await score.set_forming(name, False)
-        await score.publish_control("voices")
+            await stream.set_forming(name, False)
+        await stream.publish_control("voices")
         return out
 
     @app.delete("/voices/{name}", status_code=204)
     async def delete_voice(name: str):
-        async with score.sessions() as s:
+        async with stream.sessions() as s:
             row = await s.get(VoiceRow, name)
             if row is None:
                 raise HTTPException(404, "no such voice")
             await s.delete(row)
             await s.commit()
-        await score.forget_voice(name)
-        await score.publish_control("voices")
+        await stream.forget_voice(name)
+        await stream.publish_control("voices")
 
     # ------------------------------------------------------------------ key
 
-    @app.get("/key")
-    async def read_key():
-        """What this mind is. Read-only: it comes from mind/key.md on every start."""
-        return (await get_key(score.sessions)).to_dict()
+    @app.get("/frame")
+    async def read_frame():
+        """What this mind is. Read-only: it comes from mind/frame.md on every start."""
+        return (await get_frame(stream.sessions)).to_dict()
 
 
     # ------------------------------------------------------------------ digest
 
     @app.get("/digests")
     async def get_digests(limit: int = Query(20, ge=1, le=200)):
-        return await digest_mod.digests(score, limit)
+        return await digest_mod.digests(stream, limit)
 
     @app.get("/stats")
     async def stats(hours: float = Query(24, gt=0, le=24 * 30)):
         since = datetime.now(timezone.utc) - timedelta(hours=hours)
-        async with score.sessions() as s:
+        async with stream.sessions() as s:
             rows = (await s.execute(
                 select(LLMCall.tier, LLMCall.provider, LLMCall.model,
                        func.count(), func.count().filter(LLMCall.ok.is_(False)),
@@ -366,7 +366,7 @@ def create_app(score: Score, settings: Settings, lifespan=None) -> FastAPI:
 
     @app.get("/senses")
     async def list_senses():
-        async with score.sessions() as s:
+        async with stream.sessions() as s:
             rows = (await s.scalars(select(SenseRow).order_by(SenseRow.name))).all()
         return [{**r.to_dict(), "timezone": settings.timezone} for r in rows]
 
@@ -374,18 +374,18 @@ def create_app(score: Score, settings: Settings, lifespan=None) -> FastAPI:
     async def run_sense(name: str):
         """Run a sense once now, enabled or not, in the background."""
         await refuse_if_paused()
-        async with score.sessions() as s:
+        async with stream.sessions() as s:
             row = await s.get(SenseRow, name)
             if row is None:
                 raise HTTPException(404, "no such sense")
             spec = SenseSpec.from_row(row)
-        spawn(Sense(spec, score, settings).fetch_once())
+        spawn(Sense(spec, stream, settings).fetch_once())
         return {"started": name}
 
     @app.post("/senses", status_code=201)
     async def add_sense(x: SenseIn):
         _check_name(x.name)
-        async with score.sessions() as s:
+        async with stream.sessions() as s:
             if await s.get(SenseRow, x.name):
                 raise HTTPException(409, "a sense with that name exists")
             row = SenseRow(name=x.name, instruction=x.instruction.strip(),
@@ -394,12 +394,12 @@ def create_app(score: Score, settings: Settings, lifespan=None) -> FastAPI:
             s.add(row)
             await s.commit()
             out = row.to_dict()
-        await score.publish_control("senses")
+        await stream.publish_control("senses")
         return out
 
     @app.put("/senses/{name}")
     async def edit_sense(name: str, x: SensePatch):
-        async with score.sessions() as s:
+        async with stream.sessions() as s:
             row = await s.get(SenseRow, name)
             if row is None:
                 raise HTTPException(404, "no such sense")
@@ -415,17 +415,17 @@ def create_app(score: Score, settings: Settings, lifespan=None) -> FastAPI:
                 row.enabled = x.enabled
             await s.commit()
             out = row.to_dict()
-        await score.publish_control("senses")
+        await stream.publish_control("senses")
         return out
 
     @app.delete("/senses/{name}", status_code=204)
     async def delete_sense(name: str):
-        async with score.sessions() as s:
+        async with stream.sessions() as s:
             row = await s.get(SenseRow, name)
             if row is None:
                 raise HTTPException(404, "no such sense")
             await s.delete(row)
             await s.commit()
-        await score.publish_control("senses")
+        await stream.publish_control("senses")
 
     return app

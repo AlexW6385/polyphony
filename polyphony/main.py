@@ -1,4 +1,4 @@
-"""Wire everything together: database, Redis, score, supervisor, API.
+"""Wire everything together: database, Redis, stream, supervisor, API.
 
     python -m polyphony.main
 """
@@ -17,9 +17,9 @@ from sqlalchemy import func, select
 from . import cadence_graph, llm, runtime_config
 from .api import create_app
 from .config import Settings, get_settings
-from .db import KeyRow, LLMCall, SenseRow, VoiceRow, init_db, make_engine, make_sessionmaker
-from .key import KEY_ROW, Key
-from .score import Score
+from .db import FrameRow, LLMCall, SenseRow, VoiceRow, init_db, make_engine, make_sessionmaker
+from .frame import FRAME_ROW, Frame
+from .stream import Stream
 from .supervisor import Supervisor
 from .sense import DEFAULT_DAILY_AT, check_daily_at
 from .voice import VoiceSpec
@@ -27,21 +27,21 @@ from .voice import VoiceSpec
 log = logging.getLogger("polyphony")
 
 
-async def seed(score: Score, settings: Settings) -> None:
-    """Load the key (always) and the voices and senses (only into empty tables) from `mind/`.
+async def seed(stream: Stream, settings: Settings) -> None:
+    """Load the frame (always) and the voices and senses (only into empty tables) from `mind/`.
 
     The DB is the record of truth: once seeded, deleting a voice in the UI
     keeps it deleted across restarts.
     """
-    async with score.sessions() as s:
-        # The key is part of the mechanism, not a setting: mind/key.md wins on every start.
-        text = Key.load(settings.key_file).text
-        row = await s.get(KeyRow, KEY_ROW)
+    async with stream.sessions() as s:
+        # The frame is part of the mechanism, not a setting: mind/frame.md wins on every start.
+        text = Frame.load(settings.frame_file).text
+        row = await s.get(FrameRow, FRAME_ROW)
         if row is None:
-            s.add(KeyRow(id=KEY_ROW, text=text))
+            s.add(FrameRow(id=FRAME_ROW, text=text))
         elif row.text != text:
             row.text = text
-        log.info("key loaded from %s", settings.key_file)
+        log.info("frame loaded from %s", settings.frame_file)
         if not await s.scalar(select(func.count()).select_from(VoiceRow)):
             n = 0
             for path in sorted(settings.voices_dir.glob("*/voice.md")):
@@ -63,12 +63,12 @@ async def seed(score: Score, settings: Settings) -> None:
         await s.commit()
 
 
-def install_tracer(score: Score) -> None:
+def install_tracer(stream: Stream) -> None:
     """Write one `llm_calls` row per model call, off the hot path."""
 
     async def trace(t: llm.Trace) -> None:
         try:
-            async with score.sessions() as s:
+            async with stream.sessions() as s:
                 s.add(LLMCall(tier=t.tier, provider=t.provider, model=t.model[:128],
                               purpose=t.purpose, voice=t.voice, latency_ms=t.latency_ms,
                               input_tokens=t.input_tokens,
@@ -85,19 +85,19 @@ def build(settings: Settings | None = None):
     settings = settings or get_settings()
     engine = make_engine(settings.database_url)
     redis = aioredis.from_url(settings.redis_url, decode_responses=True)
-    score = Score(make_sessionmaker(engine), redis, window=settings.recent_window,
+    stream = Stream(make_sessionmaker(engine), redis, window=settings.recent_window,
                     namespace=settings.namespace)
 
     @contextlib.asynccontextmanager
     async def lifespan(app):
         await init_db(engine)
-        await seed(score, settings)
-        runtime_config.apply(settings, await runtime_config.load(score.sessions))
-        install_tracer(score)
+        await seed(stream, settings)
+        runtime_config.apply(settings, await runtime_config.load(stream.sessions))
+        install_tracer(stream)
         await cadence_graph.setup(settings.database_url)
-        supervisor = Supervisor(score, settings)
+        supervisor = Supervisor(stream, settings)
         task = asyncio.create_task(supervisor.run(), name="supervisor")
-        resume = asyncio.create_task(cadence_graph.resume_unfinished(score, settings))
+        resume = asyncio.create_task(cadence_graph.resume_unfinished(stream, settings))
         app.state.supervisor = supervisor
         try:
             yield
@@ -110,7 +110,7 @@ def build(settings: Settings | None = None):
             await redis.aclose()
             await engine.dispose()
 
-    return create_app(score, settings, lifespan=lifespan)
+    return create_app(stream, settings, lifespan=lifespan)
 
 
 def main() -> None:

@@ -1,6 +1,6 @@
 """A voice: one asyncio task, defined entirely by a piece of text.
 
-    idle --(score moved)--> listen --(no)--> idle
+    idle --(stream moved)--> listen --(no)--> idle
                                |
                              (yes)
                                v
@@ -24,8 +24,8 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from . import llm, prompts
 from .config import Settings
 from .db import VoiceRow
-from .key import DEFAULT_KEY, Key
-from .score import Score
+from .frame import DEFAULT_FRAME, Frame
+from .stream import Stream
 from .text import parse_front_matter
 
 log = logging.getLogger(__name__)
@@ -72,14 +72,14 @@ class Voice:
     def __init__(
         self,
         spec: VoiceSpec,
-        score: Score,
+        stream: Stream,
         settings: Settings,
-        key: Key | None = None,
+        frame: Frame | None = None,
     ):
         self.spec = spec
-        self.score = score
+        self.stream = stream
         self.settings = settings
-        self.key = key or Key(text=DEFAULT_KEY)
+        self.frame = frame or Frame(text=DEFAULT_FRAME)
         self.listen_tier = llm.resolve_tier(settings.listen_tier, spec.overrides.get("listen"))
         self.speak_tier = llm.resolve_tier(settings.speak_tier, spec.overrides.get("speak"))
         self._wake = asyncio.Event()
@@ -98,7 +98,7 @@ class Voice:
     # ------------------------------------------------------------------ loop
 
     async def run(self) -> None:
-        await self.score.set_forming(self.name, False)  # clear anything a crash left behind
+        await self.stream.set_forming(self.name, False)  # clear anything a crash left behind
         listener = asyncio.create_task(self._listen_channel(), name=f"voice:{self.name}:channel")
         try:
             await self._ready.wait()
@@ -108,7 +108,7 @@ class Voice:
                 # the first ones said, and anything that lands meanwhile joins this listen.
                 await asyncio.sleep(random.uniform(0, LISTEN_STAGGER) * self.settings.pause_scale)
                 self._wake.clear()
-                while await self.score.cadence_running():
+                while await self.stream.cadence_running():
                     # A cadence this voice is part of is running; the cadence
                     # thought will wake us again when it is over.
                     await asyncio.sleep(1)
@@ -125,14 +125,14 @@ class Voice:
                 t.cancel()
             await asyncio.gather(*tasks, return_exceptions=True)
             try:
-                await self.score.set_forming(self.name, False)
+                await self.stream.set_forming(self.name, False)
             except Exception:
                 pass
 
     async def _listen_channel(self) -> None:
         while True:
             try:
-                async for t in self.score.subscribe(ready=self._ready):
+                async for t in self.stream.subscribe(ready=self._ready):
                     if t["kind"] in SILENT_KINDS:
                         continue
                     if not (t["kind"] == "voice" and t["author"] == self.name):
@@ -147,9 +147,9 @@ class Voice:
     # ------------------------------------------------------------------ listen / speak
 
     async def _context(self, recent):
-        strays = await self.score.strays(before_seq=recent[0]["seq"], n=self.settings.strays)
-        others = await self.score.listens_latest()
-        forming = await self.score.forming()
+        strays = await self.stream.strays(before_seq=recent[0]["seq"], n=self.settings.strays)
+        others = await self.stream.listens_latest()
+        forming = await self.stream.forming()
         return strays, others, forming
 
     def _render(self, recent, strays, others, forming, extra: str | None = None) -> str:
@@ -157,42 +157,42 @@ class Voice:
                               voice_text=self.spec.text, extra=extra, tz=self.settings.timezone)
 
     async def listen(self) -> dict[str, Any] | None:
-        recent = await self.score.recent()
+        recent = await self.stream.recent()
         if not recent:
             return None
         strays, others, forming = await self._context(recent)
-        system = prompts.listen_system(self.key)
+        system = prompts.listen_system(self.frame)
         user = self._render(recent, strays, others, forming)
         decision = await llm.complete_json(
             self.listen_tier, system, user, schema=prompts.LISTEN_SCHEMA,
             tier_name="listen", purpose="listen", voice=self.name,
         )
         decision = normalize_decision(decision)
-        await self.score.record_listen(self.name, recent[-1]["seq"], decision)
+        await self.stream.record_listen(self.name, recent[-1]["seq"], decision)
         log.info("%s listened: %s — %s — %s", self.name,
                  "speak" if decision["speak"] else "rest", decision["mood"], decision["reason"])
 
         if not decision["speak"]:
             return decision
 
-        await self.score.set_forming(self.name, True)
+        await self.stream.set_forming(self.name, True)
         try:
             pause = max(0.0, min(60.0, decision["pause_seconds"])) + random.uniform(0, 2)
             await asyncio.sleep(pause * self.settings.pause_scale)
-            recent = await self.score.recent()  # the score moved while we waited
+            recent = await self.stream.recent()  # the stream moved while we waited
             _, others, forming = await self._context(recent)
             text = await llm.complete_text(
                 self.speak_tier,
-                prompts.speak_system(self.key),
+                prompts.speak_system(self.frame),
                 self._render(recent, strays, others, forming, extra=prompts.speak_mood(decision)),
                 tier_name="speak", purpose="speak", voice=self.name,
             )
             if text:
-                await self.score.append(self.name, "voice", text, mood=decision["mood"])
+                await self.stream.append(self.name, "voice", text, mood=decision["mood"])
             else:
                 log.info("%s passed: nothing left to say after re-reading", self.name)
         finally:
-            await self.score.set_forming(self.name, False)
+            await self.stream.set_forming(self.name, False)
         # The wake flag is NOT cleared here: anything that landed while we were
         # forming triggers one fresh listen against the newest state.
         return decision
