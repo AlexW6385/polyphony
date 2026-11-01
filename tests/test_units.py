@@ -243,3 +243,28 @@ async def test_anthropic_request_is_cached_and_has_room_to_think():
     assert "fallbacks" not in sent  # Haiku has no server-side fallback
     await p.complete(model="claude-sonnet-5-5", system="sys", user=user)
     assert sent["fallbacks"] == "default"
+    assert "tools" not in sent  # no search unless asked for
+
+
+async def test_anthropic_web_search_keeps_only_the_reply_after_the_search():
+    from types import SimpleNamespace as NS
+
+    from polyphony import llm
+
+    sent = {}
+
+    async def create(**kw):
+        sent.clear()
+        sent.update(kw)
+        return NS(content=[NS(type="text", text="let me check"), NS(type="server_tool_use"),
+                           NS(type="web_search_tool_result"), NS(type="text", text="the answer")],
+                  stop_reason="end_turn",
+                  usage=NS(input_tokens=1, output_tokens=1, cache_read_input_tokens=0,
+                           cache_creation_input_tokens=0))
+
+    p = llm.AnthropicProvider(None, "test-key")
+    p.client.messages.create = create
+    p.client.beta.messages.create = create
+    out = await p.complete(model="claude-sonnet-5-5", system="s", user="u", web_search=True)
+    assert out.text == "the answer"
+    assert sent["tools"] == [{"type": "web_search_20260209", "name": "web_search", "max_uses": 1}]

@@ -82,6 +82,7 @@ class Settings(BaseSettings):
     run_senses: bool = True
     run_digest: bool = True
     run_clerk: bool = True
+    speak_web_search: bool = True  # voices may search the web once when they speak (Anthropic)
 
     static_dir: Path = ROOT / "static"
 

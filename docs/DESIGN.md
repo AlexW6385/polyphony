@@ -76,6 +76,12 @@ clerk's vote asks what conscious actually asked, and its options are answers to 
 things to pick), never steps. An eleventh voice, `intent`, keeps the original question and what
 the person really wants in view, and pulls a drifting discussion back to a usable answer.
 
+**Web search when speaking.** A voice's speak call (Anthropic only) carries the server-side web
+search tool with `max_uses: 1`: the model searches only when it decides a fact needs checking, at
+most once per thought (about 2¢ per search). Listening, votes, the clerk and the digest stay
+offline. `SPEAK_WEB_SEARCH=false` turns it off; some organisations must first allow web search in
+the Claude Console. Text the model wrote before its search is dropped, so only the reply lands.
+
 **Listen stagger.** After a new thought each voice waits a random 0 to 8 seconds before it
 listens, so the voices that listen later see what the first ones said instead of all saying
 the same thing at once; anything that lands meanwhile joins that listen.

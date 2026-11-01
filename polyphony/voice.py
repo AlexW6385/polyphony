@@ -186,6 +186,7 @@ class Voice:
                 prompts.speak_system(self.frame),
                 self._render(recent, strays, others, forming, extra=prompts.speak_mood(decision)),
                 tier_name="speak", purpose="speak", voice=self.name,
+                web_search=self.settings.speak_web_search,
             )
             if text:
                 await self.stream.append(self.name, "voice", text, mood=decision["mood"])

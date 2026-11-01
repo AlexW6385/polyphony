@@ -186,7 +186,7 @@ class AnthropicProvider:
         self.official = not base_url  # server-side fallbacks exist on the Claude API only
 
     async def complete(self, *, model, system, user, json=False, schema=None, temperature=0.8,
-                       max_tokens=1024) -> Completion:
+                       max_tokens=1024, web_search=False) -> Completion:
         # The system prompt is key + engine (+ voice): mark it cacheable so the shared
         # prefix is billed once. Temperature is not sent; default sampling is fine.
         # Current models think by default and thinking counts against max_tokens, so a
@@ -199,6 +199,8 @@ class AnthropicProvider:
         if self.official and model in ANTHROPIC_FALLBACK_MODELS:
             create = self.client.beta.messages.create
             kwargs.update(betas=["server-side-fallback-2026-07-01"], fallbacks="default")
+        if web_search:  # the model searches only if it decides it needs to, at most once
+            kwargs["tools"] = [{"type": "web_search_20260209", "name": "web_search", "max_uses": 1}]
         resp = await create(
             model=model,
             system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
@@ -213,8 +215,15 @@ class AnthropicProvider:
         elif resp.stop_reason == "max_tokens":
             log.warning("anthropic %s hit max_tokens; reply may be cut off", model)
         u = resp.usage
+        # After a search, keep only what was written after its results: text before it is the
+        # model announcing the search, not the reply.
+        blocks = list(resp.content)
+        last_tool = max((i for i, b in enumerate(blocks)
+                         if getattr(b, "type", "") in ("server_tool_use", "web_search_tool_result")),
+                        default=-1)
         return Completion(
-            text="".join(b.text for b in resp.content if getattr(b, "type", None) == "text"),
+            text="".join(b.text for b in blocks[last_tool + 1:]
+                         if getattr(b, "type", None) == "text"),
             input_tokens=(u.input_tokens or 0) + (getattr(u, "cache_read_input_tokens", 0) or 0)
             + (getattr(u, "cache_creation_input_tokens", 0) or 0),
             output_tokens=u.output_tokens,
@@ -371,6 +380,7 @@ async def _once(tier: TierConfig, tier_name: str, purpose: str, voice: str | Non
     provider = get_provider(tier)
     if not isinstance(provider, AnthropicProvider):
         kw["user"] = plain(kw["user"])
+        kw.pop("web_search", None)  # only the Anthropic provider has a search tool
     start = time.perf_counter()
     try:
         out = await provider.complete(model=tier.model, **kw)
@@ -442,8 +452,9 @@ async def complete_json(
 
 async def complete_text(
     tier: TierConfig, system: str, user: str, *, temperature: float = 0.9, max_tokens: int = 1024,
-    tier_name: str = "?", purpose: str = "?", voice: str | None = None,
+    tier_name: str = "?", purpose: str = "?", voice: str | None = None, web_search: bool = False,
 ) -> str:
+    kw = {"web_search": True} if web_search else {}
     text = await _call(tier, tier_name=tier_name, purpose=purpose, voice=voice, system=system,
-                       user=user, temperature=temperature, max_tokens=max_tokens)
+                       user=user, temperature=temperature, max_tokens=max_tokens, **kw)
     return text.strip()
