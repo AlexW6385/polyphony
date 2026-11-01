@@ -243,9 +243,10 @@ function addThought(t) {
       : `<div class="body">${esc(t.content)}</div>`);
   // keep order of record even if events arrive out of order
   const stream = $("#stream");
+  // The result replaces its voting card; drop the card before finding where to insert.
+  if (t.kind === "cadence" && t.meta) stream.querySelector(`.thought.pending[data-cadence="${t.meta.cadence_id}"]`)?.remove();
   const after = [...stream.children].find(c => +c.dataset.seq > t.seq);
   div.dataset.seq = t.seq;
-  if (t.kind === "cadence" && t.meta) stream.querySelector(`.thought.pending[data-cadence="${t.meta.cadence_id}"]`)?.remove();
   stream.insertBefore(div, after || null);
   if ((!after || after.classList.contains("pending")) && followStream) { const el = streamScroller(); el.scrollTop = el.scrollHeight; }
 }

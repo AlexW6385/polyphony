@@ -53,6 +53,39 @@ Without Docker: Python 3.12+, PostgreSQL 16, Redis 7, then
 The voices and senses under `mind/` seed the database on first start; after that, edit them live
 from the page. The frame is always taken from `mind/frame.md`.
 
+## Your voices
+
+A voice is one part of you: a want, a worry, a way of seeing things. The voices are not
+characters or experts; they all speak as "I", and "I" is you. What makes a discussion worth
+reading is that they pull in different directions, the way your own thoughts do.
+
+Each voice is one or two sentences: what it cares about and how it talks. That is the whole
+definition. For example (`mind/voices/restraint/voice.md`):
+
+```
+---
+---
+觉得越少越好，能删就删，多一个步骤、多一句话都嫌多。说话很短。
+```
+
+The eleven voices in `mind/voices/` are the author's own, drawn from their style. To make your own:
+
+1. **Find your recurring pulls.** Read things you wrote yourself (chats with an assistant,
+   notes, a journal), or ask a model that knows your history to list the tensions it sees:
+   what you keep wanting, what you worry about, how you argue with yourself.
+2. **Merge and cut to about eight to twelve.** Fewer than six rarely disagree; many more and
+   each one gets little to say. Keep pairs that pull against each other (move fast vs. do it
+   right, more vs. less).
+3. **Write each in one or two sentences, without examples.** Describe the stance and the
+   manner of speaking. Leave out sample lines and personal facts: a model treats them as
+   things to talk about, and the voice keeps bringing them up.
+4. **Name each with one lowercase word** (`a-z`, digits, `-`, `_`; not `conscious`, `cadence`, `world` or `digest`).
+
+Add them on the page (Voices → Add a voice) or as `mind/voices/<name>/voice.md`. Files seed the
+database only on first start, when it has no voices yet; after that, the page is where voices
+are added, edited, disabled or deleted. The front matter can set a different model for one
+voice, e.g. `speak: {model: claude-opus-5-5}`; leave it empty otherwise.
+
 ## Models
 
 | tier | called | default |
