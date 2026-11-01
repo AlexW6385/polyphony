@@ -132,7 +132,9 @@ By default the listen model makes them. Turn on **Use Jev** in the Jev section o
 (or `DECIDER=jev`) to send them to [Jev](https://typesafe.ai), TypeSafe AI's decision model,
 which answers typed questions with probabilities instead of text: speak or not as a
 probability, the pause as a score, the mood as a choice, each voice's weight as a score, and
-support for each option as a probability. It needs a TypeSafe API key (early access). A Jev
+support for each option as a probability. It needs a TypeSafe API key (early access), or a Vercel
+AI Gateway key with `JEV_BASE_URL=https://ai-gateway.vercel.sh/typesafe` and
+`JEV_MODEL=typesafe-ai/jev` (paid credits only; free-tier keys get a 403). A Jev
 listen has no written reason; anything Jev fails on falls back to the listen model.
 
 ## Senses
