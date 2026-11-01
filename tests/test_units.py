@@ -79,13 +79,13 @@ def test_tally_multi_option_approval():
              "c": _normalize_vote(None, opts)}  # no answer: not counted
     r = tally(w, votes, opts)
     assert r["shares"] == [0.0, pytest.approx(0.375), 1.0] and r["winner"] == 2 and r["decided"]
-    # a tie at the top, or nothing at 80% or more, decides nothing
+    # a tie at the top, or nothing at 60% or more, decides nothing
     tie = {"a": {"support": [0], "reason": ""}, "b": {"support": [1], "reason": ""}}
     assert not tally({"a": 0.5, "b": 0.5}, tie, opts)["decided"]
     low = {"a": {"support": [0], "reason": ""}, "b": {"support": [], "reason": ""}}
     assert not tally({"a": 0.4, "b": 0.6}, low, opts)["decided"]
-    assert not tally({"a": 0.75, "b": 0.25}, low, opts)["decided"]  # a clear majority, short of 80%
-    assert tally({"a": 0.8, "b": 0.2}, low, opts)["decided"]
+    assert not tally({"a": 0.55, "b": 0.45}, low, opts)["decided"]  # a majority, short of 60%
+    assert tally({"a": 0.6, "b": 0.4}, low, opts)["decided"]
 
 def test_fingerprints_match_on_url_or_title():
     a = fingerprints({"title": "Big News", "url": "https://www.x.com/a/"})

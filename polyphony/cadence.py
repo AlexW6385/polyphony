@@ -2,7 +2,7 @@
 
     round 1 standing: every voice weights every voice for this question; averaged, normalised
     round 2 vote:     every voice says which options it supports (any number), weighted
-    -> each option's weighted support; the top one wins if it has at least 80% and is
+    -> each option's weighted support; the top one wins if it has at least 60% and is
        strictly ahead of the next, otherwise the question stays open
     -> a `cadence` thought in the stream with the full result
 
@@ -25,7 +25,7 @@ from .voice import VoiceSpec
 
 log = logging.getLogger(__name__)
 
-DECIDE_SHARE = 0.8  # weighted support an option needs to be decided
+DECIDE_SHARE = 0.6  # weighted support an option needs to be decided
 
 
 async def _context(stream: Stream, settings: Settings, spec: VoiceSpec) -> str:

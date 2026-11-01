@@ -43,10 +43,11 @@ window shows 40 to 59 thoughts and its start moves in steps of 20, so a new thou
 the cached prefix instead of changing it. After a cache break come the voice's text, the time
 now, strays, every voice's latest listen, who is forming, and for speak the mood.
 
-**Discussion style.** Voices talk like people in a meeting: the first time a voice speaks on a
-question it says where it stands and why, even if others said the same; after that, no quoting
-or citing other thoughts, no repeating what was said, no repeated "I agree" (agreement goes into
-a vote); speak again only to add something that matters, and let small details go. A proposal
+**Discussion style.** Voices talk like people in a meeting: a voice speaks when it has
+something to add (a different view, a point not yet made, or agreement it feels strongly enough
+to say with its own reason). If others have already said what it thinks, it stays quiet and
+waits for the vote; no quoting or citing other thoughts, no repeating what was said, and let
+small details go. A proposal
 just turned down is not proposed again straight away.
 
 **The clerk calls the votes.** Voices no longer propose cadences, and nothing is started by
@@ -58,7 +59,7 @@ differs by trigger: mid-discussion (every 5) it calls a vote once a choice is cl
 after 30 s of quiet the discussion is over and would otherwise end with no decision, so it
 calls one on the main choice, even when the voices seem to agree, unless there is truly nothing
 to decide. The cadence weighs the voices as before, then each voice
-supports any number of the options (approval voting); an option wins with at least 80% of the
+supports any number of the options (approval voting); an option wins with at least 60% of the
 weighted support and strictly ahead of the next, otherwise the question stays open. The
 yes/no "worth deciding now?" round and the confirm step are gone, as are `POST /cadence` and
 `POST /digest`.

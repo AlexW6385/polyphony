@@ -194,7 +194,7 @@ function cadenceHtml(t) {
       <td class="num">${pct(shares[i])}<div class="small">${backers(i)} of ${votes.length} voices</div></td></tr>`).join("");
   const result = r.decided
     ? `<div class="result decided">Decided: ${letter(r.winner)}. ${esc(m.options[r.winner])} (${pct(shares[r.winner])} of the weighted vote)</div>`
-    : `<div class="result">Undecided: no option had 80% or more of the weighted vote</div>`;
+    : `<div class="result">Undecided: no option had 60% or more of the weighted vote</div>`;
   const rows = votes.sort(([a], [b]) => (weights[b] || 0) - (weights[a] || 0)).map(([v, x]) => `<tr>
       <td><b>${esc(v)}</b></td><td class="num">${(weights[v] || 0).toFixed(2)}</td>
       <td>${(x.support || []).map(letter).join(", ") || "none"}</td>
