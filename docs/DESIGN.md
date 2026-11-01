@@ -127,7 +127,7 @@ same thing at once; anything that lands meanwhile joins that listen. The window 
 5 s, 4 over 2 s. A fixed window (8 s until v1.1) was too slow for a few voices and too crowded
 for many.
 
-**Jev as the decider (v1.2, off by default).** `DECIDER=jev` (or the Decisions switch on the
+**Jev as the decider (v1.2, off by default).** `DECIDER=jev` (or the Use Jev switch on the
 settings page) sends the calls that only decide to Jev, TypeSafe AI's decision model, which
 returns typed answers with probabilities instead of text, in well under a second and far below
 a language model's price: listen (speak? as a probability against `JEV_SPEAK_THRESHOLD`, how

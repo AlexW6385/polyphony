@@ -437,6 +437,28 @@ async def test_config_api_saves_models_and_never_returns_keys(stream, settings):
     runtime_config.apply(settings, {})
 
 
+async def test_jev_card_switch_needs_a_key_and_works_before_any_model_is_saved(
+        stream, settings, monkeypatch):
+    from polyphony import runtime_config
+
+    monkeypatch.delenv("TYPESAFE_API_KEY", raising=False)
+    app = create_app(stream, settings)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
+        r = await c.put("/config", json={"decider": "jev"})
+        assert r.status_code == 422 and "Jev API key" in r.text  # no key: the switch stays off
+        r = await c.put("/config", json={"jev_api_key": "ts-key-4321"})
+        assert r.status_code == 200 and "ts-key-4321" not in r.text
+        r = await c.put("/config", json={"decider": "jev"})
+        got = r.json()
+        assert got["decider"] == "jev" and got["jev_key"]["hint"] == "…4321"
+        assert settings.decider == "jev" and settings.jev_api_key == "ts-key-4321"
+        assert got["saved"] is False  # the models still come from .env
+        r = await c.put("/config", json={"decider": "llm"})
+        assert r.json()["decider"] == "llm" and settings.decider == "llm"
+    await runtime_config.save(stream.sessions, {})
+    runtime_config.apply(settings, {})
+
+
 async def test_running_vote_is_listed_for_the_page_until_resolved(stream, settings, fake):
     cid = await cad.create_cadence(stream, "Which one?", ["a", "b"], "clerk", "running")
     app = create_app(stream, settings)

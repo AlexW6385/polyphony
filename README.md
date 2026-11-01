@@ -98,7 +98,7 @@ voice, e.g. `speak: {model: claude-opus-5-5}`; leave it empty otherwise.
 | `speak` | when a voice speaks; the clerk; the digest; judges evals | `claude-sonnet-5-5` |
 | `sense` | picks and summarises news | the speak model |
 | `embed` | every thought once, in the background; one query per stream state | `qwen3-embedding:0.6b` in Ollama |
-| `jev` | instead of listen, the cadence rounds and the clerk's "vote due?", when Decisions is Jev | off |
+| `jev` | instead of listen, the cadence rounds and the clerk's "vote due?", when Use Jev is on | off |
 
 Prompts are laid out for the provider's prompt cache: the frame and rules first, then the stream
 (the same for every voice, absolute times, one cache block per thought), and only then what is
@@ -128,7 +128,7 @@ recalled at any point of the stream; `GET /memory/status` shows how far the embe
 ## Decisions: listen model or Jev
 
 Listening, the two cadence rounds and the clerk's "is a vote due?" are decisions, not writing.
-By default the listen model makes them. Switch **Decisions** to **Jev** on the settings page
+By default the listen model makes them. Turn on **Use Jev** in the Jev section of the settings page
 (or `DECIDER=jev`) to send them to [Jev](https://typesafe.ai), TypeSafe AI's decision model,
 which answers typed questions with probabilities instead of text: speak or not as a
 probability, the pause as a score, the mood as a choice, each voice's weight as a score, and

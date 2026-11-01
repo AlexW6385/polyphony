@@ -156,9 +156,19 @@ def merge(data: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
     for tier in TIERS:
         if f"{tier}_model" in patch:
             out[f"{tier}_model"] = str(patch[f"{tier}_model"] or "").strip()
-    if not out.get("provider"):
-        raise ValueError("choose a provider")
-    for tier in TIERS:
-        if not out.get(f"{tier}_model"):
-            raise ValueError(f"enter a {tier} model")
+    # A Jev-only edit (the Jev card) may come before any model was saved: .env still decides
+    # the models then, so there is nothing to check.
+    model_keys = ("provider", "api_key", *(f"{t}_model" for t in TIERS))
+    models_touched = any(k in patch for k in model_keys)
+    if models_touched or out.get("provider"):
+        if not out.get("provider"):
+            raise ValueError("choose a provider")
+        for tier in TIERS:
+            if not out.get(f"{tier}_model"):
+                raise ValueError(f"enter a {tier} model")
     return out
+
+
+def jev_key_set(settings: Settings, data: dict[str, Any]) -> bool:
+    return bool(data.get("jev_api_key") or env_base(settings).jev_api_key
+                or os.environ.get("TYPESAFE_API_KEY"))

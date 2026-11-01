@@ -142,6 +142,8 @@ def create_app(stream: Stream, settings: Settings, lifespan=None) -> FastAPI:
             data = runtime_config.merge(data, patch)
         except (ValueError, TypeError, AttributeError) as e:
             raise HTTPException(422, str(e))
+        if data.get("decider") == "jev" and not runtime_config.jev_key_set(settings, data):
+            raise HTTPException(422, "paste a Jev API key first")
         await runtime_config.save(stream.sessions, data)
         runtime_config.apply(settings, data)
         await stream.publish_control("config")  # voices restart on the new models
