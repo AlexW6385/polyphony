@@ -191,7 +191,8 @@ class Voice:
             try:
                 return await jev.listen(self.settings, st, self.name)
             except Exception as e:
-                log.warning("%s: Jev listen failed, using the listen model: %s", self.name, e)
+                (log.debug if jev.cooling_down() else log.warning)(
+                    "%s: Jev listen failed, using the listen model: %s", self.name, e)
         return await llm.complete_json(
             self.listen_tier, prompts.listen_system(self.frame), self._render(shown, ctx),
             schema=prompts.LISTEN_SCHEMA, tier_name="listen", purpose="listen", voice=self.name,

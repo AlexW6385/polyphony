@@ -277,3 +277,41 @@ def test_runtime_config_switches_decider_and_keeps_the_jev_key_secret(settings):
     assert settings.decider == "llm"
     with pytest.raises(ValueError):
         runtime_config.merge(data, {"decider": "oracle"})
+
+
+async def test_jev_429_cools_down_and_skips_calls_until_retry_time(settings, monkeypatch):
+    """After a 429, calls skip Jev (no request sent) until the provider's retry time."""
+    import httpx
+
+    hits = []
+
+    def handler(request):
+        hits.append(1)
+        return httpx.Response(429, json={"error": {"message": "this team's limit of 5 requests "
+                                                    "per minute was reached. Retry after 60s."}})
+
+    s = settings.model_copy(update={"decider": "jev", "jev_api_key": "k"})
+    client = httpx.AsyncClient(base_url="https://x", transport=httpx.MockTransport(handler))
+    monkeypatch.setattr(jev, "_client", lambda settings_: client)
+    monkeypatch.setattr(jev, "_cooldown_until", 0.0)
+    q = {"t": {"type": "noul", "instructions": "?"}}
+    with pytest.raises(jev.RateLimited):
+        await jev.ask(s, "x", q, purpose="listen")
+    assert len(hits) == 1  # a 429 is not retried
+    assert 55 < jev.cooling_down() <= 60
+    for _ in range(5):
+        with pytest.raises(jev.JevError, match="cooling down"):
+            await jev.ask(s, "x", q, purpose="listen")
+    assert len(hits) == 1  # nothing sent while cooling down
+    monkeypatch.setattr(jev, "_cooldown_until", 0.0)
+    with pytest.raises(jev.RateLimited):
+        await jev.ask(s, "x", q, purpose="listen")
+    assert len(hits) == 2
+
+
+def test_jev_retry_after_header_wins_and_is_capped():
+    import httpx
+
+    assert jev._retry_after(httpx.Response(429, headers={"retry-after": "12"})) == 12
+    assert jev._retry_after(httpx.Response(429, headers={"retry-after": "99999"})) == jev.MAX_COOLDOWN
+    assert jev._retry_after(httpx.Response(429, text="slow down")) == jev.DEFAULT_COOLDOWN

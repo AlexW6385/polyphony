@@ -42,8 +42,8 @@ async def ask_jev(stream: Stream, settings: Settings, frame: Frame, spec: VoiceS
     try:
         return await call(st)
     except Exception as e:
-        log.warning("cadence: Jev %s for %s failed, using the listen model: %s", purpose,
-                    spec.name, e)
+        (log.debug if jev.cooling_down() else log.warning)(
+            "cadence: Jev %s for %s failed, using the listen model: %s", purpose, spec.name, e)
         return None
 
 

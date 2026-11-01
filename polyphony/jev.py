@@ -31,6 +31,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
+import re
 import time
 from typing import Any
 
@@ -68,6 +69,10 @@ class JevError(Exception):
     pass
 
 
+class RateLimited(JevError):
+    """The provider answered 429: Jev is skipped until its retry time has passed."""
+
+
 def enabled(settings: Settings) -> bool:
     return settings.decider == "jev"
 
@@ -91,19 +96,63 @@ def _client(settings: Settings) -> httpx.AsyncClient:
     return _clients[k]
 
 
+# After a 429 every call skips Jev until the provider's retry time has passed, so a free
+# tier's few requests per minute are not hammered by every voice at once; skipped calls fall
+# back to the listen model like any other failure and are not sent or traced.
+DEFAULT_COOLDOWN = 60.0
+MAX_COOLDOWN = 600.0
+_cooldown_until = 0.0
+
+
+def cooling_down() -> float:
+    """Seconds left before Jev is tried again (0 if it is not cooling down)."""
+    return max(0.0, _cooldown_until - time.monotonic())
+
+
+def _retry_after(r: httpx.Response) -> float:
+    """The provider's wait: the Retry-After header, or "retry after Ns" in the body."""
+    header = r.headers.get("retry-after", "")
+    try:
+        if header:
+            return min(MAX_COOLDOWN, max(1.0, float(header)))
+    except ValueError:
+        pass
+    m = re.search(r"retry after (\d+(?:\.\d+)?)\s*s", r.text, re.IGNORECASE)
+    return min(MAX_COOLDOWN, float(m.group(1))) if m else DEFAULT_COOLDOWN
+
+
+def _cool_down(seconds: float) -> None:
+    global _cooldown_until
+    until = time.monotonic() + seconds
+    if until > _cooldown_until:
+        if cooling_down() == 0:
+            log.warning("Jev is rate-limited; using the listen model for %.0f s", seconds)
+        _cooldown_until = until
+
+
 async def ask(settings: Settings, state: Any, questions: dict[str, dict[str, Any]], *,
               purpose: str, voice: str | None = None) -> dict[str, dict[str, Any]]:
     """One System One call; returns `answers` by question name. Traced like a model call."""
+    left = cooling_down()
+    if left > 0:
+        raise JevError(f"rate-limited, cooling down for {left:.0f} s")
     body = {"model": settings.jev_model, "state": state, "questions": questions}
     for attempt in (1, 2):
         start = time.perf_counter()
         try:
             r = await _client(settings).post("/v1/systemone", json=body)
-            if r.status_code in (408, 429) or r.status_code >= 500:
+            if r.status_code == 429:
+                _cool_down(_retry_after(r))
+                _trace(settings, purpose, voice, start, ok=False,
+                       error=f"HTTP 429: {r.text[:200]}")
+                raise RateLimited(f"HTTP 429: {r.text[:200]}")
+            if r.status_code == 408 or r.status_code >= 500:
                 raise JevError(f"HTTP {r.status_code}: {r.text[:200]}")
             if r.status_code >= 400:
                 raise ValueError(f"HTTP {r.status_code}: {r.text[:300]}")
             data = r.json()
+        except RateLimited:
+            raise
         except (JevError, httpx.TransportError) as e:
             _trace(settings, purpose, voice, start, ok=False, error=str(e))
             if attempt == 1:

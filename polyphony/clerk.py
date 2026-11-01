@@ -87,7 +87,8 @@ class Clerk:
                                        jev.state(frame, recent, tz=self.settings.timezone),
                                        prompts.CLERK_WHEN[when])
             except Exception as e:
-                log.warning("clerk: Jev failed, asking the speak model: %s", e)
+                (log.debug if jev.cooling_down() else log.warning)(
+                    "clerk: Jev failed, asking the speak model: %s", e)
             else:
                 if p < self.settings.jev_clerk_threshold:
                     log.info("clerk (%s): no vote now (jev p=%.2f)", when, p)
