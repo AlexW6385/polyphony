@@ -274,20 +274,22 @@ async def test_sense_reads_feeds_and_appends_world_thought_once(score, settings,
 async def test_digest_summarises_and_does_not_wake_voices(score, mind, fake, settings):
     from polyphony.digest import write_digest
 
-    await score.append("person", "person", "should I move?")
+    await score.append("conscious", "theme", "should I move?")
     await wait_quiet(score)
     n_listens = len(await score.listens())
     base = fake.script
 
     async def script(system, user, json):
         if "You are the digest" in system:
-            return "**Question** — move?\n**Outcome** — split.\nOUTCOME: positions"
+            return _j(decided=False, outcome="split.", question="move?",
+                      positions=[{"voice": "ride", "view": "go"}], open=["when"])
         return await base(system=system, user=user, json=json)
 
     fake.script = script
     t = await write_digest(score, settings)
     assert t["kind"] == "digest" and t["meta"]["outcome"] == "positions"
-    assert "OUTCOME" not in t["content"]
+    assert t["meta"]["summary"]["positions"] == [{"voice": "ride", "view": "go"}]
+    assert t["content"].startswith("Not decided: split.") and "Still open: when" in t["content"]
     await asyncio.sleep(1.0)
     assert len(await score.listens()) == n_listens  # nobody woke up
     assert await write_digest(score, settings) is None  # nothing new since

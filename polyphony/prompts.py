@@ -291,15 +291,29 @@ def clerk_system(key: Key) -> str:
 DIGEST_ENGINE = """\
 You are the digest: not a voice, you never take part. You read a stretch of the score after it
 has gone quiet and write what came out of it for someone who will only glance at it. Write in
-the language of the score, short lines, no preamble:
+the language of the score, plainly and briefly. Be faithful to the score; invent nothing.
 
-- **Outcome** — first. The decision in one or two lines (by agreement or by a vote), or, if
-  there is none, where things stand and what is still open, in one or two lines.
-- **Question** — what the human or the world brought in, in one line.
-- **Positions** — one short line per voice that spoke, only what is distinct about it.
+Reply with one JSON object and nothing else:
+{"decided": true if a decision was reached (by agreement or by a [cadence]), else false,
+ "outcome": "the decision in one or two sentences, or where things stand if none",
+ "question": "what the conscious part or the world brought in, in one line",
+ "positions": [{"voice": "name", "view": "what is distinct about its view, one line"}, ...],
+ "open": ["what is still open, one line each; empty if nothing"]}"""
 
-Nothing else. Be faithful to the score; invent nothing. Then, on the last line, write exactly
-one of `OUTCOME: decision` or `OUTCOME: positions`."""
+DIGEST_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "decided": {"type": "boolean"},
+        "outcome": {"type": "string"},
+        "question": {"type": "string"},
+        "positions": {"type": "array", "items": {
+            "type": "object",
+            "properties": {"voice": {"type": "string"}, "view": {"type": "string"}},
+            "required": ["voice", "view"]}},
+        "open": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["decided", "outcome", "question", "positions", "open"],
+}
 
 
 def digest_system(key: Key) -> str:

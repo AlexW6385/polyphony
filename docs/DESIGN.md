@@ -57,6 +57,13 @@ weighted support and strictly ahead of the next, otherwise the question stays op
 yes/no "worth deciding now?" round and the confirm step are gone, as are `POST /cadence` and
 `POST /digest`.
 
+**Structured digest and vote cards.** The digest model answers in JSON (decided, outcome,
+question, one line per voice's position, what is still open); the score keeps a plain-text form
+for the voices to read and the page draws a card from the JSON. A vote card shows the question,
+each option with its weighted share and how many voices backed it, the result, then every
+voice's weight, choice and reason. On the page the human's input is labelled **Think** (the
+thought kind is still `theme` in code and API).
+
 **Listen stagger.** After a new thought each voice waits a random 0 to 8 seconds before it
 listens, so the voices that listen later see what the first ones said instead of all saying
 the same thing at once; anything that lands meanwhile joins that listen.

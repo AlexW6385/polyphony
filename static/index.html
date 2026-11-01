@@ -61,8 +61,10 @@
   .thought .body { white-space: pre-wrap; margin-top: 2px; }
   .thought.theme .who { color: var(--conscious); }
   .thought.theme .body { font-weight: 500; }
-  .thought.digest { border: 1px solid var(--digest); border-radius: 8px; padding: 10px 12px;
-                    margin: 10px 0; background: var(--panel); }
+  .thought.digest { margin: 10px 0; }
+  .vote.digest-card { border-color: var(--digest); }
+  .vote.digest-card .result.decided { border-left-color: var(--digest); }
+  .vote ul { margin: 0; padding-left: 18px; }
   .thought.digest .who { color: var(--digest); }
   .thought.world .who { color: var(--world); }
   .thought.world a { color: var(--world); }
@@ -112,10 +114,10 @@
 <main>
   <section id="side">
     <div class="block">
-      <h2>Theme</h2>
+      <h2>Think</h2>
       <form id="theme-form">
-        <textarea id="theme" placeholder="Drop a theme into the room…"></textarea>
-        <div class="row"><button class="primary">Theme</button>
+        <textarea id="theme" placeholder="What's on your mind…"></textarea>
+        <div class="row"><button class="primary">Think</button>
           <span class="small">⌘/Ctrl+Enter</span></div>
       </form>
     </div>
@@ -150,7 +152,7 @@
     </div>
   </section>
 
-  <section><div id="score"><p class="empty" id="empty">The score is empty. Drop a theme in.</p></div></section>
+  <section><div id="score"><p class="empty" id="empty">The score is empty. Think something.</p></div></section>
 
   <section>
     <h2>Listening</h2>
@@ -201,6 +203,20 @@ function cadenceHtml(t) {
   </div>`;
 }
 
+function digestHtml(t) {
+  const m = t.meta || {}, d = m.summary;
+  if (!d) return `<div class="body">${esc(t.content)}</div>`;  // digests written before summaries
+  const positions = (d.positions || []).map(p => `<tr><td style="width:110px"><b>${esc(p.voice)}</b></td>
+      <td>${esc(p.view)}</td></tr>`).join("");
+  return `<div class="vote digest-card">
+    <h4>Outcome</h4><div class="result ${d.decided ? "decided" : ""}">${d.decided ? "Decided: " : "Not decided: "}${esc(d.outcome)}</div>
+    ${d.question ? `<h4>Question</h4><div class="question">${esc(d.question)}</div>` : ""}
+    ${positions ? `<h4>Positions</h4><table>${positions}</table>` : ""}
+    ${(d.open || []).length ? `<h4>Still open</h4><ul>${d.open.map(o => `<li>${esc(o)}</li>`).join("")}</ul>` : ""}
+    <div class="small" style="margin-top:8px">covers #${m.from_seq}–#${m.to_seq}</div>
+  </div>`;
+}
+
 // Follow new thoughts only while the reader is at the bottom of the score; if they have
 // scrolled up to read, stay where they are.
 const scoreScroller = () => $("#score").parentElement;
@@ -219,8 +235,8 @@ function addThought(t) {
   const kindTag = t.kind === "voice" || human ? "" : `<span>[${t.kind}]</span>`;
   div.innerHTML = `<div class="meta"><span>#${t.seq}</span><span class="who">${esc(human ? "conscious" : t.author)}</span>
       ${kindTag}${t.mood ? `<span>(${esc(t.mood)})</span>` : ""}<span>${time(t.created_at)}</span>${url}</div>` +
-    (t.kind === "cadence" ? cadenceHtml(t) : `<div class="body">${esc(t.content)}</div>`) +
-    (t.kind === "digest" && t.meta ? `<div class="small">#${t.meta.from_seq}–#${t.meta.to_seq} · outcome: ${esc(t.meta.outcome)}</div>` : "");
+    (t.kind === "cadence" ? cadenceHtml(t) : t.kind === "digest" ? digestHtml(t)
+      : `<div class="body">${esc(t.content)}</div>`);
   // keep order of record even if events arrive out of order
   const score = $("#score");
   const after = [...score.children].find(c => +c.dataset.seq > t.seq);

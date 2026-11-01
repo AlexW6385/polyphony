@@ -47,16 +47,38 @@ async def write_digest(score: Score, settings: Settings) -> dict[str, Any] | Non
         return None
     key = await get_key(score.sessions)
     user = prompts.render(thoughts, [], {}, [], None, tz=settings.timezone)
-    text = await llm.complete_text(settings.speak_tier, prompts.digest_system(key), user,
-                                   temperature=0.3, max_tokens=1200, tier_name="speak",
-                                   purpose="digest")
-    if not text:
+    reply = await llm.complete_json(settings.speak_tier, prompts.digest_system(key), user,
+                                    schema=prompts.DIGEST_SCHEMA, temperature=0.3,
+                                    max_tokens=1200, tier_name="speak", purpose="digest")
+    summary = _clean(reply)
+    if not summary["outcome"]:
         return None
-    outcome = "decision" if text.rstrip().lower().endswith("outcome: decision") else "positions"
-    body = "\n".join(l for l in text.rstrip().splitlines()
-                     if not l.strip().lower().startswith("outcome:")).strip()
-    meta = {"from_seq": thoughts[0]["seq"], "to_seq": thoughts[-1]["seq"], "outcome": outcome}
-    return await score.append("digest", "digest", body, meta=meta)
+    meta = {"from_seq": thoughts[0]["seq"], "to_seq": thoughts[-1]["seq"],
+            "outcome": "decision" if summary["decided"] else "positions", "summary": summary}
+    return await score.append("digest", "digest", _as_text(summary), meta=meta)
+
+
+def _clean(reply: dict[str, Any]) -> dict[str, Any]:
+    positions = [{"voice": str(p.get("voice") or "").strip(), "view": str(p.get("view") or "").strip()}
+                 for p in reply.get("positions") or [] if isinstance(p, dict)]
+    return {
+        "decided": bool(reply.get("decided")),
+        "outcome": str(reply.get("outcome") or "").strip(),
+        "question": str(reply.get("question") or "").strip(),
+        "positions": [p for p in positions if p["voice"] and p["view"]],
+        "open": [str(o).strip() for o in reply.get("open") or [] if str(o).strip()],
+    }
+
+
+def _as_text(s: dict[str, Any]) -> str:
+    """The digest as plain text: what voices read in the score (the page uses the meta)."""
+    lines = [("Decided: " if s["decided"] else "Not decided: ") + s["outcome"]]
+    if s["question"]:
+        lines.append(f"Question: {s['question']}")
+    lines += [f"- {p['voice']}: {p['view']}" for p in s["positions"]]
+    if s["open"]:
+        lines.append("Still open: " + "; ".join(s["open"]))
+    return "\n".join(lines)
 
 
 async def quiet_for(score: Score) -> tuple[float, int] | None:
