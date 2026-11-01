@@ -89,7 +89,8 @@ ensembles/<name>/
   senses.yaml              instructions + RSS/Atom feeds
 ```
 
-Shipped: `mind` (inner voices — placeholders, rewrite them as your own), `council` (a family
+Shipped: `mind` (ten inner voices of the author, shown by moments in Chinese — rewrite them as
+your own), `council` (a family
 deciding whether to move), `public` (groups of residents reacting to city news). The files seed
 the database on first start; after that, edit the frame, voices and senses live from the page.
 
