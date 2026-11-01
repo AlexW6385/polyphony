@@ -410,3 +410,15 @@ async def test_config_api_saves_models_and_never_returns_keys(stream, settings):
     from polyphony import runtime_config
     await runtime_config.save(stream.sessions, {})
     runtime_config.apply(settings, {})
+
+
+async def test_running_vote_is_listed_for_the_page_until_resolved(stream, settings, fake):
+    cid = await cad.create_cadence(stream, "Which one?", ["a", "b"], "clerk", "running")
+    app = create_app(stream, settings)
+    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
+        [r] = (await c.get("/cadences/running")).json()
+        assert r["id"] == cid and r["options"] == ["a", "b"] and r["round"] == 1
+        await cad.set_fields(stream, cid, weights={"final": {}})
+        assert (await c.get("/cadences/running")).json()[0]["round"] == 2
+        await cad.set_fields(stream, cid, status="resolved")
+        assert (await c.get("/cadences/running")).json() == []

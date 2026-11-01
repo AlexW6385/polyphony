@@ -19,7 +19,7 @@ from . import digest as digest_mod
 from . import llm, runtime_config
 from .cadence import get_cadence
 from .config import Settings
-from .db import FrameRow, LLMCall, SenseRow, VoiceRow
+from .db import Cadence, FrameRow, LLMCall, SenseRow, VoiceRow
 from .frame import CONSCIOUS, get_frame
 from .sense import DEFAULT_DAILY_AT, Sense, SenseSpec, check_daily_at
 from .stream import Stream
@@ -229,6 +229,17 @@ def create_app(stream: Stream, settings: Settings, lifespan=None) -> FastAPI:
         return await stream.listens(limit=limit)
 
     # ------------------------------------------------------------------ cadence
+
+    @app.get("/cadences/running")
+    async def running_cadences():
+        """Votes under way, for the page's "voting" card (not part of the stream)."""
+        async with stream.sessions() as s:
+            rows = (await s.scalars(select(Cadence).where(Cadence.status == "running")
+                                    .order_by(Cadence.id))).all()
+        return [{"id": r.id, "question": r.resolution, "options": r.options,
+                 "round": 1 if r.weights is None else 2,
+                 "started_at": r.created_at.isoformat() if r.created_at else None}
+                for r in rows]
 
     @app.get("/cadence/{cid}")
     async def get_one_cadence(cid: int):

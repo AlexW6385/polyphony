@@ -85,6 +85,11 @@
   .vote th { font-weight: 500; color: var(--muted); font-size: 12px; border-top: none; }
   .vote tr.won td { font-weight: 600; }
   .vote .track { background: var(--bg); border-radius: 3px; height: 8px; margin-top: 5px; }
+  .thought.pending { border-style: dashed; }
+  .vote .voting { display: flex; align-items: center; gap: 8px; color: var(--cadence); font-weight: 600; }
+  .vote .voting .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--cadence);
+                       animation: pulse 1s infinite; }
+  .vote ol.options { margin: 0; padding-left: 22px; list-style: upper-alpha; }
   .vote .fill { height: 8px; background: var(--cadence); border-radius: 0 3px 3px 0; min-width: 1px; }
   .vote .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
   .empty { color: var(--muted); text-align: center; margin-top: 30vh; }
@@ -92,7 +97,6 @@
   .listen { display: grid; grid-template-columns: 10px 1fr; gap: 8px; padding: 6px 0;
             border-bottom: 1px dashed var(--line); }
   .dot { width: 10px; height: 10px; border-radius: 50%; margin-top: 5px; background: var(--quiet); }
-  .dot.speak { background: var(--speak); }
   .dot.forming { background: var(--speak); animation: pulse 1s infinite; }
   @keyframes pulse { 50% { opacity: .3; } }
   .listen .reason { color: var(--muted); }
@@ -241,8 +245,9 @@ function addThought(t) {
   const stream = $("#stream");
   const after = [...stream.children].find(c => +c.dataset.seq > t.seq);
   div.dataset.seq = t.seq;
+  if (t.kind === "cadence" && t.meta) stream.querySelector(`.thought.pending[data-cadence="${t.meta.cadence_id}"]`)?.remove();
   stream.insertBefore(div, after || null);
-  if (!after && followStream) { const el = streamScroller(); el.scrollTop = el.scrollHeight; }
+  if ((!after || after.classList.contains("pending")) && followStream) { const el = streamScroller(); el.scrollTop = el.scrollHeight; }
 }
 
 async function loadHistory() {
@@ -262,15 +267,45 @@ function connect() {
   es.onerror = () => { $("#status").textContent = "reconnecting…"; es.close(); setTimeout(connect, 2000); };
 }
 
+// A vote under way is shown at the end of the stream until its result lands as a thought.
+async function refreshVoting() {
+  let running;
+  try { running = await api("GET", "/cadences/running"); } catch { return; }
+  const stream = $("#stream");
+  const ids = new Set(running.map(c => String(c.id)));
+  stream.querySelectorAll(".thought.pending").forEach(d => { if (!ids.has(d.dataset.cadence)) d.remove(); });
+  for (const c of running) {
+    const stage = c.round === 1 ? "round 1 of 2: the voices weigh each other on this question"
+                                : "round 2 of 2: the voices vote";
+    const html = `<div class="meta"><span class="who">cadence</span><span>[voting]</span>
+        <span>${time(c.started_at)}</span></div>
+      <div class="vote"><div class="voting"><div class="dot"></div>Voting in progress · ${stage}</div>
+        <h4>Question</h4><div class="question">${esc(c.question)}</div>
+        <h4>Options</h4><ol class="options">${(c.options || []).map(o => `<li>${esc(o)}</li>`).join("")}</ol></div>`;
+    let div = stream.querySelector(`.thought.pending[data-cadence="${c.id}"]`);
+    if (!div) {
+      $("#empty")?.remove();
+      div = document.createElement("div");
+      div.className = "thought cadence pending";
+      div.dataset.cadence = c.id;
+      div.dataset.seq = Infinity;  // stays after every recorded thought
+      stream.appendChild(div);
+      if (followStream) { const el = streamScroller(); el.scrollTop = el.scrollHeight; }
+    }
+    if (div.innerHTML !== html) div.innerHTML = html;
+  }
+}
+
 // ---------------------------------------------------------------- listens + voices
 let voices = [];
 
 function renderListens() {
   $("#listens").innerHTML = voices.filter(v => v.enabled).map(v => {
     const l = v.last_listen;
-    const cls = v.forming ? "forming" : (l && l.speak ? "speak" : "");
-    const state = v.forming ? "forming…" : (l ? (l.speak ? "spoke" : "quiet") : "not yet");
-    return `<div class="listen"><div class="dot ${cls}"></div><div>
+    // Two states: forming (thinking and writing a thought now) or quiet (nothing to say for
+    // now, or already said it).
+    const state = v.forming ? "forming…" : "quiet";
+    return `<div class="listen"><div class="dot ${v.forming ? "forming" : ""}"></div><div>
       <b>${esc(v.name)}</b> <span class="small">${state}${l ? " · " + esc(l.mood) + " · at #" + l.trigger_seq : ""}</span>
       ${l ? `<div class="reason">${esc(l.reason)}</div>` : ""}</div></div>`;
   }).join("") || `<p class="small">No voices.</p>`;
@@ -400,7 +435,9 @@ $("#pause").addEventListener("click", async () => {
   await loadHistory();
   connect();
   refreshVoices(); refreshSenses(); refreshPause();
+  refreshVoting();
   setInterval(refreshVoices, 3000);
+  setInterval(refreshVoting, 2000);
   setInterval(refreshPause, 5000);
   setInterval(refreshSenses, 30000);
 })();

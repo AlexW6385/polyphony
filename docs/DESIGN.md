@@ -82,6 +82,12 @@ most once per thought (about 2¢ per search). Listening, votes, the clerk and th
 offline. `SPEAK_WEB_SEARCH=false` turns it off; some organisations must first allow web search in
 the Claude Console. Text the model wrote before its search is dropped, so only the reply lands.
 
+**Live vote, plain listening.** While a cadence runs, the page shows a dashed "voting" card at
+the end of the stream (question, options, which round), polled from `GET /cadences/running`; it
+is not a thought, so voices never read it, and it gives way to the result card when that lands.
+The Listening panel has two states: *forming* (thinking and writing a thought now) and *quiet*
+(nothing to say for now, or already said it).
+
 **Listen stagger.** After a new thought each voice waits a random 0 to 8 seconds before it
 listens, so the voices that listen later see what the first ones said instead of all saying
 the same thing at once; anything that lands meanwhile joins that listen.

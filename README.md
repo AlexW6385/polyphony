@@ -119,6 +119,7 @@ repetition, voice fidelity, engagement and convergence.
 | `POST /thoughts` | `{content}`: a thought from conscious (or `kind: "world"`) |
 | `GET /thoughts?after=&limit=` · `GET /stream?after=` | the record; SSE replay then live |
 | `GET /listens` | every listen, spoken or rested |
+| `GET /cadences/running` | votes under way (the page's "voting" card) |
 | `GET /cadence/{id}` | a vote the clerk called: question, options, weights, votes, result |
 | `GET /frame` | what this mind is (read-only) |
 | `GET /digests` | outcome summaries (written after 90 s of quiet) |
