@@ -54,7 +54,7 @@ hand. The clerk, an edge component like the digest and not a voice, checks the d
 15 new thoughts and once after 30 s of quiet that follows something new. Each check is one call
 on the speak model that answers whether a vote is due and, if so, the question and its options
 (at least two, as many as there are real alternatives) drawn from the discussion. The prompt
-differs by trigger: mid-discussion (every 15) it calls a vote only when one is clearly due;
+differs by trigger: mid-discussion (every 5) it calls a vote once a choice is clear, which includes most voices agreeing on an answer while still adding details;
 after 30 s of quiet the discussion is over and would otherwise end with no decision, so it
 calls one on the main choice, even when the voices seem to agree, unless there is truly nothing
 to decide. The cadence weighs the voices as before, then each voice

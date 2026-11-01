@@ -29,7 +29,7 @@ from .stream import Stream
 
 log = logging.getLogger(__name__)
 
-CHECK_EVERY = 15  # new thoughts since the last check
+CHECK_EVERY = 5  # new thoughts since the last check
 QUIET_SECONDS = 30.0  # quiet this long after something new -> check once
 TICK_SECONDS = 3.0
 TALK = {"voice", "conscious", "world"}  # what counts as discussion (not votes or digests)

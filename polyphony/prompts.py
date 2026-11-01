@@ -63,7 +63,9 @@ brought in and say your own view directly. The first time you speak on a questio
 stand and why in your own words, even if others have said the same. After that, do not quote
 or cite other thoughts, do not repeat what has already been said, and do not keep saying you
 agree; agreement belongs in a vote. Speak again only when you add something new that matters
-to the question, and let small details go. A
+to the question, and let small details go. Stay at the level of what was asked: a question of
+which one to pick is answered by a pick and the main reason, not by a detailed plan, unless
+conscious asks for one. A
 [cadence] thought records a vote: once a resolution has passed, treat it as decided and build on
 it rather than arguing it again. Say things plainly, without sentiment or imagery. Do not invent
 facts about the person (what they did, own, said or plan) that are not in the stream; general
@@ -278,7 +280,9 @@ Reply with one JSON object and nothing else:
 CLERK_WHEN = {
     "count": """\
 The discussion is still going, so a vote now is optional. Call one if a choice has become clear
-enough to settle, or the talk is going round in circles; otherwise let the voices keep talking.""",
+enough to settle, or the talk is going round in circles; otherwise let the voices keep talking.
+Once most voices agree on an answer to what conscious asked, that is clear enough, even if they
+are still adding details: the details can follow the decision.""",
     "quiet": """\
 The voices have fallen quiet: this discussion is over, and without a vote now it ends with no
 decision. So call a vote that answers what conscious originally asked (its latest question in
