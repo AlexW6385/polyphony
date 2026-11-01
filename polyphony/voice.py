@@ -1,10 +1,14 @@
 """A voice: one asyncio task, defined entirely by a piece of text.
 
-    idle --(stream moved)--> listen --(no)--> idle
-                               |
-                             (yes)
-                               v
+    idle --(stream moved)--> stagger --> mark listening --> listen --(no)--> idle
+                                                              |
+                                                            (yes)
+                                                              v
                         mark forming --> wait pause --> re-read --> speak --> append --> idle
+
+The stagger is random within `listen_stagger_per_voice` x the number of enabled voices, so the
+more voices there are, the more spread out they listen, and later ones see who is already
+listening or forming. Listen goes to the listen model, or to Jev when `decider` is "jev".
 """
 
 from __future__ import annotations
@@ -18,10 +22,10 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from . import llm, prompts
+from . import jev, llm, prompts
 from .config import Settings
 from .db import VoiceRow
 from .frame import DEFAULT_FRAME, Frame
@@ -34,7 +38,6 @@ log = logging.getLogger(__name__)
 # human, not a contribution, so it must not restart the discussion.
 SILENT_KINDS = {"digest"}
 
-LISTEN_STAGGER = 8.0  # seconds: voices start listening at random within this after a new thought
 
 @dataclass(frozen=True)
 class VoiceSpec:
@@ -68,6 +71,17 @@ async def load_voice_specs(sessions: async_sessionmaker, settings: Settings) -> 
     return [VoiceSpec.from_row(r) for r in rows]
 
 
+async def count_enabled(sessions: async_sessionmaker) -> int:
+    async with sessions() as s:
+        return int(await s.scalar(select(func.count()).select_from(VoiceRow)
+                                  .where(VoiceRow.enabled)) or 0)
+
+
+def stagger_window(settings: Settings, voices: int) -> float:
+    """Seconds within which voices start listening after a new thought."""
+    return max(0.0, settings.listen_stagger_per_voice * voices) * settings.pause_scale
+
+
 class Voice:
     def __init__(
         self,
@@ -75,8 +89,10 @@ class Voice:
         stream: Stream,
         settings: Settings,
         frame: Frame | None = None,
+        memory: Any = None,
     ):
         self.spec = spec
+        self.memory = memory  # memory.Memory, or None for no memories
         self.stream = stream
         self.settings = settings
         self.frame = frame or Frame(text=DEFAULT_FRAME)
@@ -98,7 +114,9 @@ class Voice:
     # ------------------------------------------------------------------ loop
 
     async def run(self) -> None:
-        await self.stream.set_forming(self.name, False)  # clear anything a crash left behind
+        # Clear anything a crash left behind.
+        await self.stream.set_forming(self.name, False)
+        await self.stream.set_listening(self.name, False)
         listener = asyncio.create_task(self._listen_channel(), name=f"voice:{self.name}:channel")
         try:
             await self._ready.wait()
@@ -106,7 +124,8 @@ class Voice:
                 await self._wake.wait()
                 # Don't all look at once: a voice that listens a few seconds later sees what
                 # the first ones said, and anything that lands meanwhile joins this listen.
-                await asyncio.sleep(random.uniform(0, LISTEN_STAGGER) * self.settings.pause_scale)
+                window = stagger_window(self.settings, await count_enabled(self.stream.sessions))
+                await asyncio.sleep(random.uniform(0, window))
                 self._wake.clear()
                 while await self.stream.cadence_running():
                     # A cadence this voice is part of is running; the cadence
@@ -126,6 +145,7 @@ class Voice:
             await asyncio.gather(*tasks, return_exceptions=True)
             try:
                 await self.stream.set_forming(self.name, False)
+                await self.stream.set_listening(self.name, False)
             except Exception:
                 pass
 
@@ -146,29 +166,49 @@ class Voice:
 
     # ------------------------------------------------------------------ listen / speak
 
-    async def _context(self, recent):
-        strays = await self.stream.strays(before_seq=recent[0]["seq"], n=self.settings.strays)
-        others = await self.stream.listens_latest()
-        forming = await self.stream.forming()
-        return strays, others, forming
+    async def _context(self, shown):
+        memories = await self.memory.recall(shown) if self.memory else None
+        remembered = {m["seq"] for m in memories or []}
+        strays = [t for t in await self.stream.strays(before_seq=shown[0]["seq"],
+                                                      n=self.settings.strays)
+                  if t["seq"] not in remembered]
+        return {"strays": strays, "memories": memories,
+                "others": await self.stream.listens_latest(),
+                "listening": await self.stream.listening(),
+                "forming": await self.stream.forming()}
 
-    def _render(self, recent, strays, others, forming, extra: str | None = None) -> str:
-        return prompts.render(prompts.cache_window(recent), strays, others, forming, self.name,
-                              voice_text=self.spec.text, extra=extra, tz=self.settings.timezone)
+    def _render(self, shown, ctx, extra: str | None = None) -> str:
+        return prompts.render(shown, ctx["strays"], ctx["others"], ctx["forming"], self.name,
+                              voice_text=self.spec.text, extra=extra, tz=self.settings.timezone,
+                              listening=ctx["listening"], memories=ctx["memories"])
+
+    async def _decide(self, shown, ctx) -> dict[str, Any]:
+        if jev.enabled(self.settings):
+            st = jev.state(self.frame, shown, me=self.name, voice_text=self.spec.text,
+                           memories=ctx["memories"], others=ctx["others"],
+                           listening=ctx["listening"], forming=ctx["forming"],
+                           tz=self.settings.timezone)
+            try:
+                return await jev.listen(self.settings, st, self.name)
+            except Exception as e:
+                log.warning("%s: Jev listen failed, using the listen model: %s", self.name, e)
+        return await llm.complete_json(
+            self.listen_tier, prompts.listen_system(self.frame), self._render(shown, ctx),
+            schema=prompts.LISTEN_SCHEMA, tier_name="listen", purpose="listen", voice=self.name,
+        )
 
     async def listen(self) -> dict[str, Any] | None:
         recent = await self.stream.recent()
         if not recent:
             return None
-        strays, others, forming = await self._context(recent)
-        system = prompts.listen_system(self.frame)
-        user = self._render(recent, strays, others, forming)
-        decision = await llm.complete_json(
-            self.listen_tier, system, user, schema=prompts.LISTEN_SCHEMA,
-            tier_name="listen", purpose="listen", voice=self.name,
-        )
-        decision = normalize_decision(decision)
-        await self.stream.record_listen(self.name, recent[-1]["seq"], decision)
+        await self.stream.set_listening(self.name, True)
+        try:
+            shown = prompts.cache_window(recent)
+            ctx = await self._context(shown)
+            decision = normalize_decision(await self._decide(shown, ctx))
+            await self.stream.record_listen(self.name, recent[-1]["seq"], decision)
+        finally:
+            await self.stream.set_listening(self.name, False)
         log.info("%s listened: %s — %s — %s", self.name,
                  "speak" if decision["speak"] else "rest", decision["mood"], decision["reason"])
 
@@ -179,12 +219,14 @@ class Voice:
         try:
             pause = max(0.0, min(60.0, decision["pause_seconds"])) + random.uniform(0, 2)
             await asyncio.sleep(pause * self.settings.pause_scale)
-            recent = await self.stream.recent()  # the stream moved while we waited
-            _, others, forming = await self._context(recent)
+            shown = prompts.cache_window(await self.stream.recent())  # moved while we waited
+            strays = ctx["strays"]  # the same strays it listened with
+            ctx = await self._context(shown)
+            ctx["strays"] = strays
             text = await llm.complete_text(
                 self.speak_tier,
                 prompts.speak_system(self.frame),
-                self._render(recent, strays, others, forming, extra=prompts.speak_mood(decision)),
+                self._render(shown, ctx, extra=prompts.speak_mood(decision)),
                 tier_name="speak", purpose="speak", voice=self.name,
                 web_search=self.settings.speak_web_search,
             )

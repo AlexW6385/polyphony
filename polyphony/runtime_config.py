@@ -2,7 +2,8 @@
 
 One provider, one API key, and two model names: listen (cheap, runs on every new
 thought for every voice, and the cadence rounds) and speak (what voices say, digests).
-The senses follow speak. Nothing saved means `.env` decides, as before.
+The senses follow speak. Nothing saved means `.env` decides, as before. The page can also
+switch the decision calls to Jev (`decider`) and hold Jev's own key.
 
 The saved values live in one `app_settings` row and are applied onto the shared
 `Settings` object: components that read `settings.*_tier` at call time see a change at
@@ -28,6 +29,7 @@ KEY_ENV = {"anthropic": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY",
            "deepseek": "DEEPSEEK_API_KEY", "gemini": "GEMINI_API_KEY"}
 PROVIDERS = tuple(KEY_ENV)
 TIERS = ("listen", "speak")  # what the page sets; senses follow speak
+DECIDERS = ("llm", "jev")
 # Suggestions only: any model name the provider accepts can be typed in.
 MODEL_SUGGESTIONS = {
     "anthropic": ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1"],
@@ -80,6 +82,8 @@ def apply(settings: Settings, data: dict[str, Any]) -> None:
         else:  # sense: an empty provider means "same as speak"
             for f in fields:
                 setattr(settings, f"{tier}_{f}", "")
+    settings.decider = data.get("decider") or base.decider
+    settings.jev_api_key = data.get("jev_api_key") or base.jev_api_key
 
 
 def fingerprint(settings: Settings) -> str:
@@ -96,7 +100,16 @@ def view(settings: Settings, data: dict[str, Any]) -> dict[str, Any]:
     saved_key = data.get("api_key") if data.get("provider") == provider else ""
     env_key = os.environ.get(KEY_ENV.get(provider, ""), "") or settings.speak_api_key
     key, source = (saved_key, "page") if saved_key else (env_key, "env") if env_key else ("", None)
+    jkey_saved = data.get("jev_api_key") or ""
+    jkey_env = env_base(settings).jev_api_key or os.environ.get("TYPESAFE_API_KEY", "")
+    jkey, jsource = ((jkey_saved, "page") if jkey_saved else (jkey_env, "env") if jkey_env
+                     else ("", None))
     return {
+        "decider": settings.decider,
+        "deciders": list(DECIDERS),
+        "jev_model": settings.jev_model,
+        "jev_key": {"set": bool(jkey), "source": jsource,
+                    "hint": f"…{jkey[-4:]}" if jkey else ""},
         "provider": provider,
         "providers": list(PROVIDERS),
         "api_key": {"set": bool(key), "source": source, "hint": f"…{key[-4:]}" if key else ""},
@@ -109,7 +122,8 @@ def view(settings: Settings, data: dict[str, Any]) -> dict[str, Any]:
 
 
 def merge(data: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
-    """Apply a page edit: provider, api_key ("" removes it), listen_model, speak_model.
+    """Apply a page edit: provider, api_key ("" removes it), listen_model, speak_model,
+    decider ("llm" or "jev"), jev_api_key ("" removes it).
 
     Switching provider drops a saved key unless a new one comes with it: a key belongs
     to one vendor.
@@ -128,6 +142,17 @@ def merge(data: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
             out["api_key"] = key
         else:
             out.pop("api_key", None)
+    if "decider" in patch:
+        decider = str(patch["decider"] or "llm")
+        if decider not in DECIDERS:
+            raise ValueError(f"unknown decider {decider!r}")
+        out["decider"] = decider
+    if "jev_api_key" in patch:
+        key = str(patch["jev_api_key"] or "").strip()
+        if key:
+            out["jev_api_key"] = key
+        else:
+            out.pop("jev_api_key", None)
     for tier in TIERS:
         if f"{tier}_model" in patch:
             out[f"{tier}_model"] = str(patch[f"{tier}_model"] or "").strip()

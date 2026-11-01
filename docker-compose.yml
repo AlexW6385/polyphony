@@ -11,6 +11,10 @@ services:
       STATIC_DIR: /app/static
       HOST: 0.0.0.0                       # inside the container only; see ports
       MCP_FETCH_COMMAND: mcp-server-fetch # installed in the image
+      # Memory embeddings run in Ollama on the host (on a Mac, outside Docker it uses the GPU).
+      EMBED_BASE_URL: ${EMBED_BASE_URL:-http://host.docker.internal:11434}
+    extra_hosts:
+      - "host.docker.internal:host-gateway"  # Linux; Docker Desktop provides it already
     ports:
       - "127.0.0.1:${PORT:-8000}:8000"    # no auth: reachable from this machine only
     depends_on:

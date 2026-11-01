@@ -5,9 +5,9 @@ on the control channel. On a change it diffs the tables against what is
 running and starts, stops, or restarts (text changed) the affected tasks. A
 frame edit changes every voice's fingerprint, so all voices restart with it.
 
-It also runs the edge components that are not per-row: the digester and the
-clerk (which calls votes). While everything is paused (`Stream.set_paused`) it
-runs nothing at all: every voice, sense and edge component is stopped until
+It also runs the edge components that are not per-row: the digester, the
+clerk (which calls votes) and the memory embedder. While everything is paused
+(`Stream.set_paused`) it runs nothing at all: every voice, sense and edge component is stopped until
 it is resumed.
 This is what makes "add a voice from the UI" work without a restart, and it
 works across processes because the signal goes through Redis.
@@ -43,8 +43,10 @@ class _Running:
 
 
 class Supervisor:
-    def __init__(self, stream: Stream, settings: Settings, *, run_senses: bool | None = None):
+    def __init__(self, stream: Stream, settings: Settings, *, run_senses: bool | None = None,
+                 memory=None):
         self.stream = stream
+        self.memory = memory  # memory.Memory shared by every voice, or None
         self.settings = settings
         self.run_senses = settings.run_senses if run_senses is None else run_senses
         self.voices: dict[str, _Running] = {}
@@ -80,7 +82,7 @@ class Supervisor:
                 )
 
     def _make_voice(self, spec, frame):
-        return Voice(spec, self.stream, self.settings, frame).run()
+        return Voice(spec, self.stream, self.settings, frame, memory=self.memory).run()
 
     async def _diff(self, running: dict[str, _Running], wanted: dict[str, str], make, kind: str):
         for name in list(running):
@@ -114,6 +116,8 @@ class Supervisor:
         if self.settings.run_clerk:
             self.edges.append(asyncio.create_task(Clerk(self.stream, self.settings).run(),
                                                   name="clerk"))
+        if self.memory is not None and self.memory.enabled:
+            self.edges.append(asyncio.create_task(self.memory.run(), name="embedder"))
 
     async def run(self) -> None:
         await self.sync()

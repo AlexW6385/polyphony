@@ -16,7 +16,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from . import llm, prompts
+from . import jev, llm, prompts
 from .config import Settings
 from .db import Cadence
 from .stream import Stream
@@ -32,6 +32,19 @@ async def _context(stream: Stream, settings: Settings, spec: VoiceSpec) -> str:
     recent = prompts.cache_window(await stream.recent())
     return prompts.render(recent, [], await stream.listens_latest(), await stream.forming(),
                           spec.name, voice_text=spec.text, tz=settings.timezone)
+
+
+async def ask_jev(stream: Stream, settings: Settings, frame: Frame, spec: VoiceSpec, call,
+                  purpose: str) -> dict[str, Any] | None:
+    """A cadence round on Jev: `call(state)` returns the answer; None if Jev failed."""
+    recent = prompts.cache_window(await stream.recent())
+    st = jev.state(frame, recent, me=spec.name, voice_text=spec.text, tz=settings.timezone)
+    try:
+        return await call(st)
+    except Exception as e:
+        log.warning("cadence: Jev %s for %s failed, using the listen model: %s", purpose,
+                    spec.name, e)
+        return None
 
 
 async def ask(stream: Stream, settings: Settings, frame: Frame, spec: VoiceSpec, tier_name: str,

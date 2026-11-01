@@ -114,11 +114,20 @@
       <div class="field"><input id="speak-model" list="models" class="mono">
         <div class="hint">Writes what a voice says (with web search), the clerk's calls and the digest.</div>
         <div class="result" id="speak-result"></div></div>
+      <label for="decider">Decisions</label>
+      <div class="field"><select id="decider">
+          <option value="llm">Listen model (default)</option>
+          <option value="jev">Jev (TypeSafe decision model)</option></select>
+        <div class="hint">What decides whether a voice speaks, casts the votes and tells the clerk whether a vote is due. Jev answers with probabilities instead of text, in well under a second; anything it fails on falls back to the listen model.</div></div>
+      <label for="jev-key">Jev API key</label>
+      <div class="field"><input id="jev-key" type="password" autocomplete="off">
+        <div class="hint" id="jev-key-state"></div>
+        <div class="result" id="jev-result"></div></div>
     </div>
     <datalist id="models"></datalist>
     <div class="actions">
       <button id="save" class="primary">Save</button>
-      <button id="test">Test both</button>
+      <button id="test">Test</button>
       <span class="hint" id="saved-state"></span>
     </div>
   </div>
@@ -173,6 +182,13 @@ function renderConfig() {
   $("#listen-model").value = cfg.listen_model;
   $("#speak-model").value = cfg.speak_model;
   $("#key").value = "";
+  $("#decider").value = cfg.decider;
+  $("#jev-key").value = "";
+  const j = cfg.jev_key;
+  $("#jev-key").placeholder = j.set ? "paste a new key to replace it" : "paste your TypeSafe API key";
+  $("#jev-key-state").textContent = j.set
+    ? `Key set (${j.hint}, ${j.source === "page" ? "saved here" : "from .env"}). Model ${cfg.jev_model}.`
+    : "Only needed when Decisions is Jev. Early access: request it at typesafe.ai.";
   showKeyState();
   fillModels();
   $("#saved-state").textContent = cfg.saved ? "" : "Currently using the values from .env.";
@@ -191,9 +207,11 @@ function fillModels() {
 $("#provider").addEventListener("change", () => { showKeyState(); fillModels(); });
 $("#save").addEventListener("click", async () => {
   const body = {provider: $("#provider").value, listen_model: $("#listen-model").value.trim(),
-                speak_model: $("#speak-model").value.trim()};
+                speak_model: $("#speak-model").value.trim(), decider: $("#decider").value};
   const key = $("#key").value.trim();
   if (key) body.api_key = key;
+  const jkey = $("#jev-key").value.trim();
+  if (jkey) body.jev_api_key = jkey;
   cfg = await api("PUT", "/config", body);
   renderConfig();
   $("#saved-state").textContent = "Saved. Voices restart on the new models.";
@@ -202,6 +220,12 @@ $("#test").addEventListener("click", async () => {
   for (const tier of ["listen", "speak"]) {
     const out = $(`#${tier}-result`); out.className = "result"; out.textContent = "testing…";
     const r = await api("POST", `/config/test/${tier}`);
+    out.className = `result ${r.ok ? "ok" : "bad"}`;
+    out.textContent = r.ok ? `${r.model} answered in ${fmt(r.ms)} ms` : `${r.model}: ${r.error}`;
+  }
+  if (cfg.decider === "jev" || cfg.jev_key.set) {
+    const out = $("#jev-result"); out.className = "result"; out.textContent = "testing…";
+    const r = await api("POST", "/config/test/jev");
     out.className = `result ${r.ok ? "ok" : "bad"}`;
     out.textContent = r.ok ? `${r.model} answered in ${fmt(r.ms)} ms` : `${r.model}: ${r.error}`;
   }

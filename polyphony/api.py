@@ -10,13 +10,13 @@ from typing import Any
 
 from datetime import datetime, timedelta, timezone
 
-from fastapi import FastAPI, Header, HTTPException, Query
+from fastapi import FastAPI, Header, HTTPException, Query, Request
 from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
 from . import digest as digest_mod
-from . import llm, runtime_config
+from . import jev, llm, prompts, runtime_config
 from .cadence import get_cadence
 from .config import Settings
 from .db import Cadence, FrameRow, LLMCall, SenseRow, VoiceRow
@@ -150,11 +150,22 @@ def create_app(stream: Stream, settings: Settings, lifespan=None) -> FastAPI:
     @app.post("/config/test/{tier}")
     async def config_test(tier: str):
         """One tiny call on a tier, to check its provider, model and key."""
+        loop = asyncio.get_running_loop()
+        start = loop.time()
+        if tier == "jev":
+            try:
+                a = await jev.ask(settings, "The sky is blue.",
+                                  {"t": {"type": "noul", "instructions": "Is the sky blue?"}},
+                                  purpose="test")
+            except Exception as e:
+                return {"ok": False, "provider": "typesafe", "model": settings.jev_model,
+                        "error": str(e)[:300]}
+            return {"ok": True, "provider": "typesafe", "model": settings.jev_model,
+                    "reply": f"p={a['t'].get('noul')}",
+                    "ms": round((loop.time() - start) * 1000)}
         if tier not in runtime_config.TIERS:
             raise HTTPException(404, "no such tier")
         t = getattr(settings, f"{tier}_tier")
-        loop = asyncio.get_running_loop()
-        start = loop.time()
         try:
             text = await llm.complete_text(t, "Reply with the single word: ok", "ping",
                                            max_tokens=64, tier_name=tier, purpose="test")
@@ -257,10 +268,12 @@ def create_app(stream: Stream, settings: Settings, lifespan=None) -> FastAPI:
         async with stream.sessions() as s:
             rows = (await s.scalars(select(VoiceRow).order_by(VoiceRow.name))).all()
         forming = set(await stream.forming())
+        listening = set(await stream.listening())
         latest = await stream.listens_latest()
         return [
             {"name": r.name, "text": r.text, "overrides": r.overrides or {}, "enabled": r.enabled,
-             "forming": r.name in forming, "last_listen": latest.get(r.name)}
+             "listening": r.name in listening, "forming": r.name in forming,
+             "last_listen": latest.get(r.name)}
             for r in rows
         ]
 
@@ -316,6 +329,32 @@ def create_app(stream: Stream, settings: Settings, lifespan=None) -> FastAPI:
         """What this mind is. Read-only: it comes from mind/frame.md on every start."""
         return (await get_frame(stream.sessions)).to_dict()
 
+
+    # ------------------------------------------------------------------ memory
+
+    @app.get("/memory/status")
+    async def memory_status(request: Request):
+        """Whether memory is on, which model, and how many thoughts are embedded / pending."""
+        memory = getattr(request.app.state, "memory", None)
+        return await memory.status() if memory else {"enabled": False}
+
+    @app.get("/memory")
+    async def memory_at(request: Request, seq: int | None = Query(None, ge=1)):
+        """What memory retrieves for the window a voice would see when `seq` is the newest
+        thought (default: now). Uncached, for tuning `MEMORY_MIN_SIMILARITY`."""
+        memory = getattr(request.app.state, "memory", None)
+        if not memory:
+            raise HTTPException(409, "memory is off")
+        if seq is None:
+            recent = await stream.recent()
+        else:
+            recent = [t for t in await stream.thoughts(after=max(0, seq - stream.window),
+                                                       limit=stream.window) if t["seq"] <= seq]
+        shown = prompts.cache_window(recent)
+        if not shown:
+            return {"window": None, "memories": []}
+        return {"window": [shown[0]["seq"], shown[-1]["seq"]],
+                "memories": await memory.search(shown)}
 
     # ------------------------------------------------------------------ digest
 

@@ -19,6 +19,7 @@ from .api import create_app
 from .config import Settings, get_settings
 from .db import FrameRow, LLMCall, SenseRow, VoiceRow, init_db, make_engine, make_sessionmaker
 from .frame import FRAME_ROW, Frame
+from .memory import Memory
 from .stream import Stream
 from .supervisor import Supervisor
 from .sense import DEFAULT_DAILY_AT, check_daily_at
@@ -94,7 +95,13 @@ def build(settings: Settings | None = None):
         runtime_config.apply(settings, await runtime_config.load(stream.sessions))
         install_tracer(stream)
         await cadence_graph.setup(settings.database_url)
-        supervisor = Supervisor(stream, settings)
+        memory = Memory(stream, settings) if settings.run_memory and settings.embed_provider \
+            else None
+        if memory is not None and not await memory.setup():
+            await memory.aclose()
+            memory = None
+        app.state.memory = memory
+        supervisor = Supervisor(stream, settings, memory=memory)
         task = asyncio.create_task(supervisor.run(), name="supervisor")
         resume = asyncio.create_task(cadence_graph.resume_unfinished(stream, settings))
         app.state.supervisor = supervisor
@@ -106,6 +113,8 @@ def build(settings: Settings | None = None):
             await asyncio.gather(task, resume, return_exceptions=True)
             llm.set_tracer(None)
             await cadence_graph.shutdown()
+            if memory is not None:
+                await memory.aclose()
             await redis.aclose()
             await engine.dispose()
 

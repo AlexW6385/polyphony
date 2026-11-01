@@ -98,6 +98,7 @@
             border-bottom: 1px dashed var(--line); }
   .dot { width: 10px; height: 10px; border-radius: 50%; margin-top: 5px; background: var(--quiet); }
   .dot.forming { background: var(--speak); animation: pulse 1s infinite; }
+  .dot.listening { background: var(--speak); opacity: .45; }
   @keyframes pulse { 50% { opacity: .3; } }
   .listen .reason { color: var(--muted); }
   @media (max-width: 1000px) {
@@ -301,10 +302,11 @@ let voices = [];
 function renderListens() {
   $("#listens").innerHTML = voices.filter(v => v.enabled).map(v => {
     const l = v.last_listen;
-    // Two states: forming (thinking and writing a thought now) or quiet (nothing to say for
-    // now, or already said it).
-    const state = v.forming ? "forming…" : "quiet";
-    return `<div class="listen"><div class="dot ${v.forming ? "forming" : ""}"></div><div>
+    // Three states: listening (deciding whether to speak), forming (writing a thought now) or
+    // quiet (nothing to say for now, or already said it).
+    const state = v.forming ? "forming…" : v.listening ? "listening…" : "quiet";
+    const dot = v.forming ? "forming" : v.listening ? "listening" : "";
+    return `<div class="listen"><div class="dot ${dot}"></div><div>
       <b>${esc(v.name)}</b> <span class="small">${state}${l ? " · " + esc(l.mood) + " · at #" + l.trigger_seq : ""}</span>
       ${l ? `<div class="reason">${esc(l.reason)}</div>` : ""}</div></div>`;
   }).join("") || `<p class="small">No voices.</p>`;

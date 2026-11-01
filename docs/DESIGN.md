@@ -2,7 +2,11 @@
 
 > Many voices of one mind, no conductor.
 
-## Current state (v1.1)
+## Current state (v1.2)
+
+v1.2 adds three things on top of v1.1 (described in place below): **memory** is back, on a
+multilingual local model; voices show a **listening** state; and the decision calls can run on
+**Jev**, a decision model, instead of the listen model.
 
 Polyphony is now one thing: the inner voices of one mind discussing what the conscious part
 brings in. The general "polyphony of anything" engine described in the v1 sections below was
@@ -22,12 +26,25 @@ and dropped; cadence stayed).
 
 **Removed:** ensembles (one set of frame, voices and senses under `mind/`; the `ENSEMBLE`
 setting and the `council` and `public` examples are gone; the human is always `conscious`);
-memory (embeddings, pgvector retrieval, `/memories`); the waker (no voice is woken after
+the waker (no voice is woken after
 quiet: a quiet stream is the end of a discussion); `ENABLED_VOICES` (voices are switched on and
 off on the page); local models altogether (listen is `claude-haiku-5-5`, speak
 `claude-sonnet-5-5`; the Ollama provider, the shadow teacher, `listen_samples`, the simulator
 and the distillation notebook are gone: listen is about 6% of the cost, so a local student
 would save little). Strays (a few random older thoughts) remain.
+
+**Memory (v1.2).** Memory was removed in v1.1 and is back, as in the v1 Memory section below,
+with two changes. The embedding model is **Qwen3-Embedding-0.6B** through Ollama on the host
+(`qwen3-embedding:0.6b`, 1024 dimensions): Chinese and English share one vector space, which
+the old `nomic-embed-text` did not give (it is English-only and scores near zero across
+languages). It is instruction-aware, so queries carry a one-line retrieval task and stored
+thoughts are embedded as they are. Only voice, conscious and world thoughts are embedded; a
+memory must reach a cosine similarity of `MEMORY_MIN_SIMILARITY` (0.5) and at most `MEMORY_K`
+(4) are shown, so an unrelated history yields no memories rather than noise. The table's vector
+size follows `EMBED_DIM`; a new size rebuilds it and a new model drops the old vectors, and the
+embedder refills both in the background. Memory is best-effort: with Ollama down or no
+pgvector, voices get no memories and nothing else changes. `GET /memory?seq=` shows what would
+be retrieved for any point of the stream, for tuning; `GET /memory/status` shows progress.
 
 **The frame is part of the mechanism.** It is copied from `mind/frame.md` on every start and is
 neither shown nor editable on the page (`GET /frame` only).
@@ -41,7 +58,8 @@ the resolution), so it is the same for every voice. The user message starts with
 also the same for every voice, with absolute times and one cache block per thought; the
 window shows 40 to 59 thoughts and its start moves in steps of 20, so a new thought appends to
 the cached prefix instead of changing it. After a cache break come the voice's text, the time
-now, strays, every voice's latest listen, who is forming, and for speak the mood.
+now, strays, memories, every voice's latest listen, who is listening and forming, and for speak
+the mood.
 
 **Discussion style.** Voices talk like people in a meeting: a voice speaks when it has
 something to add (a different view, a point not yet made, or agreement it feels strongly enough
@@ -93,12 +111,35 @@ votes, so another AI app gets an answer in one call instead of polling the strea
 **Live vote, plain listening.** While a cadence runs, the page shows a dashed "voting" card at
 the end of the stream (question, options, which round), polled from `GET /cadences/running`; it
 is not a thought, so voices never read it, and it gives way to the result card when that lands.
-The Listening panel has two states: *forming* (thinking and writing a thought now) and *quiet*
-(nothing to say for now, or already said it).
+The Listening panel has three states: *listening* (deciding whether to speak), *forming*
+(thinking and writing a thought now) and *quiet* (nothing to say for now, or already said it).
 
-**Listen stagger.** After a new thought each voice waits a random 0 to 8 seconds before it
-listens, so the voices that listen later see what the first ones said instead of all saying
-the same thing at once; anything that lands meanwhile joins that listen.
+**Listening is visible (v1.2).** A voice is in the `listening` set (Redis) from the moment it
+starts reading until its decision is recorded, and every listen and speak prompt shows who is
+deciding right now next to who is forming. Before, a voice became visible only once its listen
+call returned (about a second), so two voices listening in the same second could not see each
+other; now they can, and can wait. It is information, not a rule.
+
+**Listen stagger.** After a new thought each voice waits a random time before it listens, so
+the voices that listen later see what the first ones decided and said instead of all saying the
+same thing at once; anything that lands meanwhile joins that listen. The window is
+`LISTEN_STAGGER_PER_VOICE` (0.5 s) times the number of enabled voices: 10 voices spread over
+5 s, 4 over 2 s. A fixed window (8 s until v1.1) was too slow for a few voices and too crowded
+for many.
+
+**Jev as the decider (v1.2, off by default).** `DECIDER=jev` (or the Decisions switch on the
+settings page) sends the calls that only decide to Jev, TypeSafe AI's decision model, which
+returns typed answers with probabilities instead of text, in well under a second and far below
+a language model's price: listen (speak? as a probability against `JEV_SPEAK_THRESHOLD`, how
+long to wait as a score over four levels, mood as a choice), standing (each voice's weight as a
+score), vote (support for each option as a probability, so approval voting stays) and the
+clerk's "is a vote due?" (only a yes reaches the speak model, which drafts the question and
+options, since Jev cannot write them). Jev reads a JSON state with the same facts a listen
+prompt shows, trimmed to the last 30 thoughts because irrelevant context hurts its accuracy. A
+listen decided by Jev has no written reason (its reason records p(speak)); reasons are not shown
+to other voices anyway. Any Jev failure falls back to the listen model for that call. Open
+question for evals: how often Jev and the listen model agree on speak, and whether its
+weaker non-English handling matters for voices written in Chinese.
 
 **Senses** run once a day at a fixed local time (`daily_at`, default 04:00, `TIMEZONE`), not
 on an interval, so resuming or restarting never sets one off and none cuts into a discussion
@@ -400,8 +441,8 @@ to what is being said now.
   listening against that state reuses it. N voices cost one embedding and one vector search
   per stream move, not N.
 - Strays stay: memories are relevance, strays are serendipity. Both are labelled as such.
-- Embeddings run locally by default (Ollama, `nomic-embed-text`); any embedding provider the
-  LLM layer supports can be configured.
+- Embeddings run locally by default (Ollama; `qwen3-embedding:0.6b` since v1.2, see the
+  current state above); any OpenAI-compatible embedding endpoint can be configured instead.
 
 This is retrieval over the room's own history — the modern form of what used to be called
 RAG — and it is how "topics can reconnect to something from long ago" becomes real rather than

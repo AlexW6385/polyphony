@@ -66,6 +66,34 @@ class Settings(BaseSettings):
     mcp_http_port: int = 8001
     api_url: str = "http://127.0.0.1:8000"
 
+    # Memory: older thoughts related to what is being said now, by meaning (pgvector).
+    # Empty provider = memory off. "ollama" (native API) or "openai" (any OpenAI-compatible
+    # /v1/embeddings endpoint). The dimension fixes the table's vector size; changing the
+    # model or dimension re-embeds everything in the background.
+    embed_provider: str = "ollama"
+    embed_model: str = "qwen3-embedding:0.6b"
+    embed_base_url: str = ""  # ollama: http://localhost:11434; compose points at the host
+    embed_api_key: str = ""
+    embed_dim: int = 1024
+    memory_k: int = 4  # at most this many memories per prompt
+    memory_query_last: int = 3  # the query is the last few thoughts of the stream
+    memory_min_similarity: float = 0.5  # cosine similarity below this is not a memory
+
+    # Decisions: "llm" (the listen model, as before) or "jev" (TypeSafe's decision model) for
+    # the calls that are pure decisions: listen, the cadence rounds, and whether the clerk
+    # calls a vote. Jev returns typed answers with probabilities, no text.
+    decider: str = "llm"
+    jev_api_key: str = ""  # or TYPESAFE_API_KEY
+    jev_model: str = "jev-latest"
+    jev_base_url: str = "https://api.typesafe.ai"
+    jev_speak_threshold: float = 0.5  # p(speak) at or above this -> the voice speaks
+    jev_support_threshold: float = 0.5  # p(supports option) at or above this -> supports it
+    jev_clerk_threshold: float = 0.5  # p(a vote is due) at or above this -> the clerk drafts one
+
+    # Voices start listening at random within (this x number of voices) seconds of a new
+    # thought, so later ones see what the first ones decided. 10 voices -> within 5 s.
+    listen_stagger_per_voice: float = 0.5
+
     pause_scale: float = 1.0  # tests: shrink voices' pauses and listen stagger to run faster
     recent_window: int = 60  # what Redis keeps; prompts show 40-59 (see prompts.cache_window)
     strays: int = 4
@@ -76,6 +104,7 @@ class Settings(BaseSettings):
     run_senses: bool = True
     run_digest: bool = True
     run_clerk: bool = True
+    run_memory: bool = True
     speak_web_search: bool = True  # voices may search the web once when they speak (Anthropic)
 
     static_dir: Path = ROOT / "static"

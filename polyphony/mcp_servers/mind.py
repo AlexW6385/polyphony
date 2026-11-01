@@ -102,11 +102,11 @@ async def read_stream(after: int = 0, limit: int = 100) -> list[dict[str, Any]]:
 
 @mcp.tool()
 async def list_voices() -> list[dict[str, Any]]:
-    """The voices: name, enabled, whether forming a thought now, last listen."""
+    """The voices: name, enabled, whether listening or forming a thought now, last listen."""
     async with _client() as c:
         r = await c.get("/voices")
         r.raise_for_status()
-        return [{"name": v["name"], "enabled": v["enabled"], "forming": v["forming"],
+        return [{"name": v["name"], "enabled": v["enabled"], "listening": v.get("listening", False), "forming": v["forming"],
                  "last_listen": v["last_listen"]} for v in r.json()]
 
 

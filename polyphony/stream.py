@@ -1,7 +1,7 @@
 """The stream: the only shared thing.
 
 PostgreSQL decides the order of record (`seq`). Redis holds a cache of the
-recent window, the set of voices currently forming, every voice's latest
+recent window, the sets of voices currently listening and forming, every voice's latest
 listen, and the pub/sub channels that wake voices up. Nothing here is held
 in process memory, so voices can live in separate processes later.
 """
@@ -27,6 +27,8 @@ log = logging.getLogger(__name__)
 K_THOUGHTS = "thoughts"  # pub/sub; payload = thought JSON
 K_RECENT = "recent"  # sorted set of thought JSON scored by seq, trimmed to the window
 K_FORMING = "forming"  # set of voice names currently composing
+K_LISTENING = "listening"  # set of voice names deciding right now whether to speak
+K_MEMORY = "memory:"  # + tail seq of the shown window -> cached memory recall JSON
 K_LISTEN = "listen:"  # + voice name -> latest listen JSON
 K_CONTROL = "control"  # pub/sub; {"voices"|"senses"|"frame": "changed"}
 K_CADENCE = "cadence:running"  # set while a cadence is running (with a TTL)
@@ -183,6 +185,22 @@ class Stream:
     async def forget_voice(self, voice: str) -> None:
         await self.redis.delete(self.redis_key(K_LISTEN) + voice)
         await self.redis.srem(self.redis_key(K_FORMING), voice)
+        await self.redis.srem(self.redis_key(K_LISTENING), voice)
+
+    # ---------------------------------------------------------------- listening
+
+    async def set_listening(self, voice: str, on: bool) -> None:
+        """A voice is listening from the moment it starts reading until its decision lands.
+
+        Others see it, so two voices waking together know that someone else is deciding too.
+        """
+        if on:
+            await self.redis.sadd(self.redis_key(K_LISTENING), voice)
+        else:
+            await self.redis.srem(self.redis_key(K_LISTENING), voice)
+
+    async def listening(self) -> list[str]:
+        return sorted(await self.redis.smembers(self.redis_key(K_LISTENING)))
 
     # ---------------------------------------------------------------- forming
 
@@ -222,7 +240,7 @@ class Stream:
             # A cadence cut off mid-way would otherwise hold voices back until its TTL.
             async for k in self.redis.scan_iter(match=self.redis_key(K_CADENCE) + ":*", count=100):
                 await self.redis.delete(k)
-            await self.redis.delete(self.redis_key(K_FORMING))
+            await self.redis.delete(self.redis_key(K_FORMING), self.redis_key(K_LISTENING))
         await self.publish_control("paused")
 
     async def cadence_running(self) -> bool:

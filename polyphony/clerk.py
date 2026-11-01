@@ -4,7 +4,8 @@ An edge component like the digest, never a voice: it does not speak in the strea
 at the discussion every `CHECK_EVERY` new thoughts, and once when the stream has been quiet
 for `QUIET_SECONDS` after something new was said. Each check is one model call that reads
 the stream and answers whether a vote is due and, if so, the question and its options (at
-least two) drawn from the discussion. The prompt depends on why it is looking: mid-discussion
+least two) drawn from the discussion. With `decider` = "jev", Jev first answers whether a
+vote is due, and only a yes reaches the model that drafts it. The prompt depends on why it is looking: mid-discussion
 it only calls a vote that is clearly due; after the stream has gone quiet the discussion is
 over, so it calls one unless there is truly nothing to decide. A vote it calls runs as a
 cadence (cadence.py) and its result lands in the stream; voices treat a decided cadence as
@@ -20,7 +21,7 @@ import asyncio
 import logging
 from typing import Any
 
-from . import llm, prompts
+from . import jev, llm, prompts
 from .cadence import run_cadence
 from .config import Settings
 from .digest import quiet_for
@@ -78,6 +79,19 @@ class Clerk:
         """
         frame = await get_frame(self.stream.sessions)
         recent = prompts.cache_window(await self.stream.recent())
+        if jev.enabled(self.settings):
+            # Jev answers whether a vote is due; only a yes goes on to the speak model, which
+            # drafts the question and options.
+            try:
+                p = await jev.vote_due(self.settings,
+                                       jev.state(frame, recent, tz=self.settings.timezone),
+                                       prompts.CLERK_WHEN[when])
+            except Exception as e:
+                log.warning("clerk: Jev failed, asking the speak model: %s", e)
+            else:
+                if p < self.settings.jev_clerk_threshold:
+                    log.info("clerk (%s): no vote now (jev p=%.2f)", when, p)
+                    return None
         user = prompts.render(recent, [], {}, [], None, tz=self.settings.timezone)
         reply = await llm.complete_json(self.settings.speak_tier, prompts.clerk_system(frame, when),
                                         user, schema=prompts.CLERK_SCHEMA, temperature=0.2,

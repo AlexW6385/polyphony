@@ -23,7 +23,6 @@ STEPS: list[tuple[str, str]] = [
      "ALTER TABLE senses ADD COLUMN IF NOT EXISTS feeds JSONB NOT NULL DEFAULT '[]'"),
     ("llm_calls.queue_ms", "ALTER TABLE llm_calls DROP COLUMN IF EXISTS queue_ms"),
     ("drop listen_samples (no local listen)", "DROP TABLE IF EXISTS listen_samples"),
-    ("drop thought_embeddings", "DROP TABLE IF EXISTS thought_embeddings"),
     ("senses.daily_at",
      "ALTER TABLE senses ADD COLUMN IF NOT EXISTS daily_at VARCHAR(5) NOT NULL DEFAULT '04:00'"),
     ("senses.every_minutes", "ALTER TABLE senses DROP COLUMN IF EXISTS every_minutes"),

@@ -12,6 +12,7 @@ import re
 
 import pytest
 import redis.asyncio as aioredis
+from sqlalchemy import text
 
 from polyphony import llm
 from polyphony.config import Settings
@@ -56,7 +57,7 @@ def settings(tmp_path):
         listen_provider="fake", listen_model="fake-listen",
         speak_provider="fake", speak_model="fake-speak",
         mind_dir=tmp_path / "mind", namespace="ptest",
-        run_senses=False, run_digest=False, run_clerk=False,
+        run_senses=False, run_digest=False, run_clerk=False, run_memory=False,
         pause_scale=0.0,
         _env_file=None,
     )
@@ -67,6 +68,9 @@ async def stream(settings):
     engine = make_engine(DB_URL)
     try:
         async with engine.begin() as conn:
+            # Memory's table is not in the ORM metadata (its size comes from settings) and
+            # references thoughts, so it goes first.
+            await conn.execute(text("DROP TABLE IF EXISTS thought_embeddings"))
             await conn.run_sync(Base.metadata.drop_all)
             await conn.run_sync(Base.metadata.create_all)
     except Exception as e:  # pragma: no cover

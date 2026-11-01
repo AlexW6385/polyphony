@@ -10,7 +10,8 @@ hit across voices and across calls:
     system:  frame text -> engine text (and, for a cadence, the resolution)   same for every voice
     user:    the stream, oldest first, one cache chunk per thought           same for every voice
              ---- cache break ----
-             voice text, now, strays, every voice's latest listen, forming, mood
+             voice text, now, strays, memory, every voice's latest listen, who is
+             listening and forming, mood
 
 The stream uses absolute times (and its window moves in steps of `WINDOW_STEP`), so a
 new thought only appends to the cached prefix instead of changing it.
@@ -78,7 +79,7 @@ LISTEN_ENGINE = f"""\
 
 Right now you are only listening: read the stream and decide whether you want to say something.
 If others are forming a thought right now, let them speak first (use pause_seconds) unless you
-have something only you would say.
+have something only you would say. Voices deciding right now have not chosen yet; they may speak.
 
 Reply with one JSON object and nothing else:
 {{"speak": true|false, "mood": "one or two words", "reason": "one short sentence",
@@ -171,6 +172,8 @@ def render(
     voice_text: str | None = None,
     extra: str | None = None,
     tz: str = "UTC",
+    listening: list[str] | None = None,
+    memories: list[dict[str, Any]] | None = None,
 ) -> str:
     """The user message: the stream (shared, cached) then what is particular to this call."""
     stream = ["## The stream (oldest first)\n"]
@@ -185,6 +188,10 @@ def render(
     tail.append("\n## Stray thoughts (older, surfacing at random)")
     tail.extend([_thought_line(t, tz) for t in strays] or ["(none)"])
 
+    if memories is not None:
+        tail.append("\n## Memory (older thoughts related to what is being said now)")
+        tail.extend([_thought_line(t, tz) for t in memories] or ["(none)"])
+
     tail.append("\n## Latest listen of every voice")
     if others:
         for name, l in others.items():
@@ -196,6 +203,11 @@ def render(
             tail.append(f'{who}: {act} — {l.get("mood") or "?"} (at [{l.get("trigger_seq")}])')
     else:
         tail.append("(nobody has listened yet)")
+
+    if listening is not None:
+        tail.append("\n## Deciding right now whether to speak")
+        others_listening = [v for v in listening if v != me]
+        tail.append(", ".join(others_listening) if others_listening else "(nobody)")
 
     tail.append("\n## Forming a thought right now")
     others_forming = [f for f in forming if f != me]

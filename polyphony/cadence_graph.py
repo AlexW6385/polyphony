@@ -2,6 +2,7 @@
 
     standing (fan-out) -> weights -> vote (fan-out) -> tally -> record
 
+- Standing and vote go to Jev when `decider` is "jev" (falling back to the listen model).
 - Each node's output is checkpointed (PostgreSQL in production, memory in
   tests), keyed by thread `cadence-<id>`. After a crash or restart,
   `resume_unfinished()` continues every running cadence from its last
@@ -23,10 +24,11 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 from sqlalchemy import select
 
-from . import prompts
+from . import jev, prompts
 from .cadence import (
     _normalize_vote,
     ask,
+    ask_jev,
     average_weights,
     get_cadence,
     set_fields,
@@ -95,12 +97,19 @@ def build(stream: Stream, settings: Settings):
         frame = await get_frame(stream.sessions)
         specs = await load_voice_specs(stream.sessions, settings)
         names = [s.name for s in specs]
-        answers = await asyncio.gather(*[
-            ask(stream, settings, frame, s, "listen",
-                prompts.standing_system(frame, state["question"], state["options"], names),
-                "standing")
-            for s in specs
-        ])
+        q, opts = state["question"], state["options"]
+
+        async def one(s):
+            if jev.enabled(settings):
+                a = await ask_jev(stream, settings, frame, s,
+                                  lambda st: jev.standing(settings, st, s.name, q, opts, names),
+                                  "standing")
+                if a is not None:
+                    return a
+            return await ask(stream, settings, frame, s, "listen",
+                             prompts.standing_system(frame, q, opts, names), "standing")
+
+        answers = await asyncio.gather(*[one(s) for s in specs])
         return {"names": names, "proposals": dict(zip(names, answers))}
 
     async def weights(state: CadenceState) -> CadenceState:
@@ -113,12 +122,18 @@ def build(stream: Stream, settings: Settings):
         frame = await get_frame(stream.sessions)
         specs = [s for s in await load_voice_specs(stream.sessions, settings)
                  if s.name in state["names"]]
-        answers = await asyncio.gather(*[
-            ask(stream, settings, frame, s, "listen",
-                prompts.vote_system(frame, state["question"], state["options"], state["weights"]),
-                "vote")
-            for s in specs
-        ])
+        q, opts, w = state["question"], state["options"], state["weights"]
+
+        async def one(s):
+            if jev.enabled(settings):
+                a = await ask_jev(stream, settings, frame, s,
+                                  lambda st: jev.vote(settings, st, s.name, q, opts, w), "vote")
+                if a is not None:
+                    return a
+            return await ask(stream, settings, frame, s, "listen",
+                             prompts.vote_system(frame, q, opts, w), "vote")
+
+        answers = await asyncio.gather(*[one(s) for s in specs])
         votes = {s.name: _normalize_vote(a, state["options"]) for s, a in zip(specs, answers)}
         for n in state["names"]:  # a voice removed mid-cadence does not count
             votes.setdefault(n, _normalize_vote(None, state["options"]))
