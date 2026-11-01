@@ -38,9 +38,15 @@ window shows 40 to 59 thoughts and its start moves in steps of 20, so a new thou
 the cached prefix instead of changing it. After a cache break come the voice's text, the time
 now, strays, every voice's latest listen, who is forming, and for speak the mood.
 
-**Discussion style.** Voices talk like people in a meeting: their own view, directly; no
-quoting or citing other thoughts, no repeating what was said, no "I agree" (agreement goes
-into a vote); speak only to add something that matters, and let small details go.
+**Discussion style.** Voices talk like people in a meeting: the first time a voice speaks on a
+question it says where it stands and why, even if others said the same; after that, no quoting
+or citing other thoughts, no repeating what was said, no repeated "I agree" (agreement goes into
+a vote); speak again only to add something that matters, and let small details go. A proposal
+just turned down is not proposed again straight away.
+
+**Listen stagger.** After a new thought each voice waits a random 0 to 8 seconds before it
+listens, so the voices that listen later see what the first ones said instead of all saying
+the same thing at once; anything that lands meanwhile joins that listen.
 
 **Senses** run once a day at a fixed local time (`daily_at`, default 04:00, `TIMEZONE`), not
 on an interval, so resuming or restarting never sets one off and none cuts into a discussion

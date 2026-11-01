@@ -72,7 +72,7 @@ class Settings(BaseSettings):
     mcp_http_port: int = 8001
     api_url: str = "http://127.0.0.1:8000"
 
-    pause_scale: float = 1.0  # simulator: shrink voices' pause_seconds to run faster
+    pause_scale: float = 1.0  # tests: shrink voices' pauses and listen stagger to run faster
     recent_window: int = 60  # what Redis keeps; prompts show 40-59 (see prompts.cache_window)
     strays: int = 4
     host: str = "127.0.0.1"  # compose sets 0.0.0.0 inside the container, published on 127.0.0.1

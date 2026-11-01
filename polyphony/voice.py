@@ -37,6 +37,8 @@ ProposeFn = Callable[[str, str], Awaitable[Any]]  # (proposer, resolution)
 # human, not a contribution, so it must not restart the discussion.
 SILENT_KINDS = {"digest"}
 
+LISTEN_STAGGER = 8.0  # seconds: voices start listening at random within this after a new thought
+
 # Small listen models copy schema placeholders into propose_cadence, or echo the
 # proposal thought back; none of these is a resolution anyone could vote on.
 PROPOSAL_PREFIX = "i think we should decide this:"
@@ -129,6 +131,9 @@ class Voice:
             await self._ready.wait()
             while True:
                 await self._wake.wait()
+                # Don't all look at once: a voice that listens a few seconds later sees what
+                # the first ones said, and anything that lands meanwhile joins this listen.
+                await asyncio.sleep(random.uniform(0, LISTEN_STAGGER) * self.settings.pause_scale)
                 self._wake.clear()
                 while await self.score.cadence_running():
                     # A cadence this voice is part of is running; the cadence

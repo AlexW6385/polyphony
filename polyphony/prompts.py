@@ -59,9 +59,11 @@ def _compose(key: Key, engine: str, details: str | None = None) -> str:
 _ENGINE_COMMON = """\
 Several voices share one score of thoughts. There is no conductor: each voice decides for
 itself when to speak. The voices are in one discussion, like a meeting: stay on what was
-brought in and say your own view directly. Do not quote or cite other thoughts, do not
-repeat what has already been said, and do not say you agree; agreement belongs in a vote. Speak
-only when you add something new that matters to the question, and let small details go. A
+brought in and say your own view directly. The first time you speak on a question, say where you
+stand and why in your own words, even if others have said the same. After that, do not quote
+or cite other thoughts, do not repeat what has already been said, and do not keep saying you
+agree; agreement belongs in a vote. Speak again only when you add something new that matters
+to the question, and let small details go. A
 [cadence] thought records a vote: once a resolution has passed, treat it as decided and build on
 it rather than arguing it again. Say things plainly: do not invent facts that are not in the
 score, and do not dress things up with sentiment or imagery."""
@@ -81,8 +83,9 @@ Reply with one JSON object and nothing else:
 
 propose_cadence stays null, or holds the full text of a resolution you want everyone to vote on
 now. Propose one when the question has been taken as far as talk can take it and what is left is
-going round in circles: a vote settles it and lets the room rest. If a vote failed only on its
-wording, propose the corrected resolution."""
+going round in circles: a vote settles it and lets the room rest. If a proposal was just turned
+down as not worth deciding now, keep talking instead of proposing again. If a vote failed only
+on its wording, propose the corrected resolution."""
 
 LISTEN_SCHEMA: dict[str, Any] = {
     "type": "object",
