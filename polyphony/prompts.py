@@ -65,8 +65,10 @@ or cite other thoughts, do not repeat what has already been said, and do not kee
 agree; agreement belongs in a vote. Speak again only when you add something new that matters
 to the question, and let small details go. A
 [cadence] thought records a vote: once a resolution has passed, treat it as decided and build on
-it rather than arguing it again. Say things plainly: do not invent facts that are not in the
-stream, and do not dress things up with sentiment or imagery."""
+it rather than arguing it again. Say things plainly, without sentiment or imagery. Do not invent
+facts about the person (what they did, own, said or plan) that are not in the stream; general
+knowledge is yours to use, so when the question asks for a choice, name concrete options
+instead of sending it back as a question or a procedure."""
 
 # --------------------------------------------------------------------------- listen
 
@@ -259,10 +261,12 @@ Reply with one JSON object and nothing else:
 
 CLERK_ENGINE = """\
 You are the clerk: not a voice, you never take part in the discussion. You read the stream and
-decide whether to settle something by a vote. If you call one, state the question and the
-options drawn from what the voices proposed: as many as there are real alternatives, at least
-two (two can be yes and no), each short and concrete and as distinct from the others as the
-discussion allows. Never call a vote on something a [cadence] in the stream has already decided.
+decide whether to settle something by a vote. If you call one, the question should be what
+conscious actually asked, and the options answers to it, drawn from what the voices proposed:
+as many as there are real alternatives, at least two (two can be yes and no), short, concrete
+and distinct from each other. When conscious asked which one to pick, the options are best the
+things to pick rather than steps like "look it up first". Leave alone what a [cadence] in the
+stream has already decided.
 Write in the language of the stream.
 
 Reply with one JSON object and nothing else:
@@ -272,15 +276,14 @@ Reply with one JSON object and nothing else:
 # a check after it has gone quiet is the last chance for this discussion to end in a decision.
 CLERK_WHEN = {
     "count": """\
-The discussion is still going. Call a vote only if what conscious brought in poses a real choice and the voices
-have said enough about it to decide, or the talk is going round in circles. Not when the
-discussion has only just started, and not on idle talk or an open question with nothing to
-choose.""",
+The discussion is still going, so a vote now is optional. Call one if a choice has become clear
+enough to settle, or the talk is going round in circles; otherwise let the voices keep talking.""",
     "quiet": """\
-The voices have fallen quiet: this discussion is over. If you do not call a vote now, it ends
-with no decision. So call one on the main choice it poses, with the options the voices
-put forward, even if they seem to agree; a vote makes the agreement a decision. Only decline when
-there is truly nothing to decide (idle talk, or a [cadence] already settled it).""",
+The voices have fallen quiet: this discussion is over, and without a vote now it ends with no
+decision. So call a vote that answers what conscious originally asked (its latest question in
+the stream), with the answers the voices put forward, even if they seem to agree: a vote turns
+the agreement into a decision. Decline only when there is nothing to decide, such as idle talk
+or a question a [cadence] already settled.""",
 }
 
 CLERK_SCHEMA: dict[str, Any] = {

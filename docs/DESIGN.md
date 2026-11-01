@@ -69,6 +69,13 @@ for the voices to read and the page draws a card from the JSON. A vote card show
 each option with its weighted share and how many voices backed it, the result, then every
 voice's weight, choice and reason. On the page the person types under **Think**.
 
+**Answers, not procedures.** The plain-talk rule forbids inventing facts about the person (what
+they did, own, said or plan), not using general knowledge: when the question asks for a choice,
+voices name concrete options instead of sending it back as "look it up" or "ask someone". The
+clerk's vote asks what conscious actually asked, and its options are answers to that (the
+things to pick), never steps. An eleventh voice, `intent`, keeps the original question and what
+the person really wants in view, and pulls a drifting discussion back to a usable answer.
+
 **Listen stagger.** After a new thought each voice waits a random 0 to 8 seconds before it
 listens, so the voices that listen later see what the first ones said instead of all saying
 the same thing at once; anything that lands meanwhile joins that listen.
@@ -218,9 +225,9 @@ text must be framing-neutral: it never mentions minds, heads, people, or groups.
 
 Three ensembles ship as examples:
 
-- `mind` — ten voices written from the author's own head, each described in a sentence or
+- `mind` — eleven voices written from the author's own head, each described in a sentence or
   two of Chinese: what it cares about and how it talks (`worldbuilder`, `aesthete`, `restraint`, `deriver`, `seeker`, `restless`,
-  `pragmatist`, `trickster`, `feeling`, `explainer`). They replaced the generic v0 voices, which
+  `pragmatist`, `trickster`, `feeling`, `explainer`, `intent`). They replaced the generic v0 voices, which
   were roles (a fact-checker, a fairness reviewer) and carried "stay quiet when…" rules in
   their own text.
 - `council` — a handful of distinct people deciding something together (e.g. a family
