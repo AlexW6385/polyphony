@@ -131,7 +131,8 @@ def build(stream: Stream, settings: Settings):
                 if a is not None:
                     return a
             return await ask(stream, settings, frame, s, "listen",
-                             prompts.vote_system(frame, q, opts, w), "vote")
+                             prompts.vote_system(frame, q, opts, w), "vote",
+                             schema=prompts.VOTE_SCHEMA)
 
         answers = await asyncio.gather(*[one(s) for s in specs])
         votes = {s.name: _normalize_vote(a, state["options"]) for s, a in zip(specs, answers)}

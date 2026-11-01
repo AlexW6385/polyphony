@@ -199,6 +199,7 @@ def test_jev_answers_map_to_the_existing_shapes():
     v = jev.vote_answer({"o0": {"noul": 0.9}, "o1": {"noul": 0.2}, "o2": {"noul": 0.5}},
                         ["a", "b", "c"], 0.5)
     assert v["support"] == ["A", "C"]
+    assert v["reason"] == "" and v["by"] == "jev" and v["p"] == [0.9, 0.2, 0.5]
     w = jev.standing_answer({"w_ride": {"score": 2}, "w_rest": {"score": 1}}, ["ride", "rest"])
     assert w == {"weights": {"ride": 1.0, "rest": 0.5}}
     qs = jev.listen_questions("ride")

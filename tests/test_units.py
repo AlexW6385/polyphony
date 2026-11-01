@@ -87,6 +87,31 @@ def test_tally_multi_option_approval():
     assert not tally({"a": 0.55, "b": 0.45}, low, opts)["decided"]  # a majority, short of 60%
     assert tally({"a": 0.6, "b": 0.4}, low, opts)["decided"]
 
+def test_vote_text_wins_over_a_slipped_letter():
+    from polyphony.cadence import _normalize_vote
+
+    opts = ["坐GO bus", "打车", "今天不去，按原计划爬山"]
+    # letter and copied text agree
+    assert _normalize_vote({"support": ["C. 今天不去，按原计划爬山"]}, opts)["support"] == [2]
+    # letter slipped, text says C: the text wins
+    assert _normalize_vote({"support": ["A. 今天不去，按原计划爬山"]}, opts)["support"] == [2]
+    # bare letters, numbers and bare text still work
+    assert _normalize_vote({"support": ["b", "3", "坐GO bus"]}, opts)["support"] == [0, 1, 2]
+    assert _normalize_vote({"support": ["Z", "9", "飞过去"]}, opts)["support"] == []
+
+
+def test_jev_vote_prints_no_raw_scores():
+    from polyphony.cadence import _normalize_vote, summarize
+
+    opts = ["a", "b"]
+    votes = {"x": _normalize_vote({"support": [], "reason": "", "by": "jev", "p": [0.1, 0.2]}, opts),
+             "y": _normalize_vote({"support": ["A. a"], "reason": "想要 a"}, opts)}
+    text = summarize("q", opts, {"x": 0.5, "y": 0.5}, votes, tally({"x": .5, "y": .5}, votes, opts))
+    assert "- x (0.50): none (jev)\n" in text + "\n" and "0.10" not in text
+    assert "- y (0.50): A — 想要 a" in text
+    assert votes["x"]["p"] == [0.1, 0.2]
+
+
 def test_fingerprints_match_on_url_or_title():
     a = fingerprints({"title": "Big News", "url": "https://www.x.com/a/"})
     b = fingerprints({"title": "big   news", "url": "http://x.com/other"})

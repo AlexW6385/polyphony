@@ -14,6 +14,7 @@ This module holds the storage helpers and the pure math.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from . import jev, llm, prompts
@@ -48,13 +49,14 @@ async def ask_jev(stream: Stream, settings: Settings, frame: Frame, spec: VoiceS
 
 
 async def ask(stream: Stream, settings: Settings, frame: Frame, spec: VoiceSpec, tier_name: str,
-              system: str, purpose: str) -> dict[str, Any] | None:
+              system: str, purpose: str,
+              schema: dict[str, Any] | None = None) -> dict[str, Any] | None:
     base = settings.listen_tier if tier_name == "listen" else settings.speak_tier
     tier = llm.resolve_tier(base, spec.overrides.get(tier_name))
     try:
         return await llm.complete_json(tier, system, await _context(stream, settings, spec),
                                        temperature=0.5, tier_name=tier_name, purpose=purpose,
-                                       voice=spec.name)
+                                       voice=spec.name, schema=schema)
     except Exception:
         log.exception("cadence: %s did not answer", spec.name)
         return None
@@ -136,23 +138,46 @@ def tally(weights: dict[str, float], votes: dict[str, dict[str, Any]],
     return {"shares": shares, "winner": top if decided else None, "decided": decided}
 
 
+_PICK = re.compile(r"^\s*([A-Za-z]|\d+)\s*[.、:：)）-]?\s*(.*)$", re.S)
+
+
+def _option_index(t: str, options: list[str]) -> int | None:
+    """One pick as an option index. The option's text wins over its letter when both are given
+    and disagree: a model copying the text means that option, a bare letter can slip."""
+    t = t.strip()
+    if t in options:
+        return options.index(t)
+    m = _PICK.match(t)
+    if not m:
+        return None
+    head, rest = m.group(1), m.group(2).strip()
+    if rest:
+        if rest in options:
+            return options.index(rest)
+        hits = [i for i, o in enumerate(options) if rest.startswith(o) or o.startswith(rest)]
+        if len(hits) == 1:
+            return hits[0]
+    if head.isalpha() and len(head) == 1 and ord(head.upper()) - 65 < len(options):
+        return ord(head.upper()) - 65
+    if head.isdigit() and 1 <= int(head) <= len(options):
+        return int(head) - 1
+    return None
+
+
 def _normalize_vote(d: dict[str, Any] | None, options: list[str]) -> dict[str, Any]:
-    """`support` as option indexes; letters ("A"), numbers or the option text are accepted."""
+    """`support` as option indexes; "A", "A. <text>", numbers or the option text are accepted."""
     if not d:
         return {"support": [], "reason": "(no answer)", "answered": False}
     raw = d.get("support") or []
     if not isinstance(raw, list):
         raw = [raw]
-    picked: set[int] = set()
-    for x in raw:
-        t = str(x).strip()
-        if len(t) == 1 and t.upper().isalpha() and ord(t.upper()) - 65 < len(options):
-            picked.add(ord(t.upper()) - 65)
-        elif t.isdigit() and 1 <= int(t) <= len(options):
-            picked.add(int(t) - 1)
-        elif t in options:
-            picked.add(options.index(t))
-    return {"support": sorted(picked), "reason": str(d.get("reason") or ""), "answered": True}
+    picked = {i for i in (_option_index(str(x), options) for x in raw) if i is not None}
+    out = {"support": sorted(picked), "reason": str(d.get("reason") or ""), "answered": True}
+    if d.get("by"):
+        out["by"] = str(d["by"])
+    if isinstance(d.get("p"), list):
+        out["p"] = d["p"]
+    return out
 
 
 def summarize(question: str, options: list[str], weights: dict[str, float],
@@ -169,7 +194,12 @@ def summarize(question: str, options: list[str], weights: dict[str, float],
                                          sorted(weights.items(), key=lambda kv: -kv[1])), ""]
     for n, v in votes.items():
         picked = ", ".join(letter(i) for i in v["support"]) or "none"
-        lines.append(f"- {n} ({weights.get(n, 0):.2f}): {picked} — {v['reason']}")
+        line = f"- {n} ({weights.get(n, 0):.2f}): {picked}"
+        if v.get("by"):  # a decider that writes no reason (Jev)
+            line += f" ({v['by']})"
+        if v.get("reason"):
+            line += f" — {v['reason']}"
+        lines.append(line)
     return "\n".join(lines)
 
 

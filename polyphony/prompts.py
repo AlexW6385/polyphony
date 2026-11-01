@@ -264,12 +264,25 @@ The question put to the vote:
 The voices have agreed on these weights for this question:
 {w}
 
-Second round: vote. Say which options you support, by letter: one, several, or none. Give a
-one-line reason in your own voice.
+Second round: vote. First give a one-line reason in your own voice: what you want here. Then
+list the options that reason supports: one, several, or none. Write each one as its letter and
+its full text, copied exactly from the list above (for example "A. <text of A>"), so the letter
+cannot drift from what you mean. Check each pick against your reason before you answer.
 
-Reply with one JSON object and nothing else:
-{{"support": ["A", ...], "reason": "one line, in the language of the stream"}}"""
+Reply with one JSON object and nothing else, reason first:
+{{"reason": "one line, in the language of the stream", "support": ["A. <text of A>", ...]}}"""
     return _compose(frame, CADENCE_ENGINE, details)
+
+
+# Reason before support: the model commits to what it wants, then picks the options for it.
+VOTE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "reason": {"type": "string"},
+        "support": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["reason", "support"],
+}
 
 
 # --------------------------------------------------------------------------- clerk

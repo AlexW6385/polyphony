@@ -317,9 +317,11 @@ def vote_questions(me: str, question: str, options: list[str],
 
 def vote_answer(answers: dict[str, dict[str, Any]], options: list[str],
                 threshold: float) -> dict[str, Any]:
+    """Jev writes no reason: the vote carries `by: "jev"` and its probabilities in `p`, which
+    stay in the cadence record and are not printed into the stream as if they were words."""
     ps = [float(answers[f"o{i}"].get("noul") or 0.0) for i in range(len(options))]
     return {"support": [_letter(i) for i, p in enumerate(ps) if p >= threshold],
-            "reason": "jev " + ", ".join(f"{_letter(i)} {p:.2f}" for i, p in enumerate(ps))}
+            "reason": "", "by": "jev", "p": [round(p, 2) for p in ps]}
 
 
 async def standing(settings: Settings, st: dict[str, Any], me: str, question: str,
