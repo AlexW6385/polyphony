@@ -55,10 +55,14 @@ senses live from the page.
 
 | tier | called | default |
 |---|---|---|
-| `listen` | every new thought, once per voice | `claude-haiku-5-5` |
-| `speak` | when a voice speaks; cadences; digest | `claude-sonnet-5-5` |
-| `teacher` | labels 5% of listens for training a local listen model later; judges evals | the speak model |
+| `listen` | every new thought, once per voice; the cadence rounds | `claude-haiku-5-5` |
+| `speak` | when a voice speaks; the digest; judges evals | `claude-sonnet-5-5` |
 | `sense` | picks and summarises news | the speak model |
+
+Prompts are laid out for the provider's prompt cache: the key and rules first, then the score
+(the same for every voice, absolute times, one cache block per thought), and only then what is
+particular to one call (the voice, the time now, strays, who is listening). A new thought
+appends to a prefix that is already cached instead of changing it.
 
 Set the provider, key and the two models on the settings page, or in `.env`
 (see `.env.example`). Providers: `anthropic`, `openai` (and OpenAI-compatible endpoints),
@@ -102,17 +106,9 @@ python scripts/eval.py                      # every scenario in polyphony/evals/
 python scripts/eval.py --compare evals/results/A.json evals/results/B.json
 ```
 
-Each scenario runs in its own database and Redis namespace against the real models; the teacher
-judges the outcome first (does the digest give a decision or a clear map of positions), then
+Each scenario runs in its own database and Redis namespace against the real models; the speak
+model judges the outcome first (does the digest give a decision or a clear map of positions), then
 repetition, voice fidelity, engagement and convergence.
-
-## Distilling listen (later)
-
-The tooling for replacing the listen model with a small local one is in place but not in use:
-self-play data (`python -m simulate.run`), the 5% teacher labels on live listens, a time-split
-export (`scripts/export_listen_samples.py`), a Colab notebook
-([`training/distill_listen.ipynb`](training/distill_listen.ipynb)) and a student report
-(`scripts/eval_listen_student.py`).
 
 ## API
 

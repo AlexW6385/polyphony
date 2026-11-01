@@ -24,7 +24,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from . import llm, prompts
 from .config import Settings
-from .db import ListenSample, VoiceRow
+from .db import VoiceRow
 from .key import DEFAULT_KEY, Key
 from .score import Score
 from .text import parse_front_matter
@@ -174,15 +174,16 @@ class Voice:
         forming = await self.score.forming()
         return strays, others, forming
 
-    def _render(self, recent, strays, others, forming) -> str:
-        return prompts.render(recent, strays, others, forming, self.name)
+    def _render(self, recent, strays, others, forming, extra: str | None = None) -> str:
+        return prompts.render(prompts.cache_window(recent), strays, others, forming, self.name,
+                              voice_text=self.spec.text, extra=extra, tz=self.settings.timezone)
 
     async def listen(self) -> dict[str, Any] | None:
         recent = await self.score.recent()
         if not recent:
             return None
         strays, others, forming = await self._context(recent)
-        system = prompts.listen_system(self.key, self.name, self.spec.text)
+        system = prompts.listen_system(self.key)
         user = self._render(recent, strays, others, forming)
         decision = await llm.complete_json(
             self.listen_tier, system, user, schema=prompts.LISTEN_SCHEMA,
@@ -191,10 +192,9 @@ class Voice:
         decision = normalize_decision(decision)
         if decision["propose_cadence"] and repeats_proposal(decision["propose_cadence"], recent):
             decision["propose_cadence"] = None
-        row = await self.score.record_listen(self.name, recent[-1]["seq"], decision)
+        await self.score.record_listen(self.name, recent[-1]["seq"], decision)
         log.info("%s listened: %s — %s — %s", self.name,
                  "speak" if decision["speak"] else "rest", decision["mood"], decision["reason"])
-        self._sample(row["id"], system, user, decision)
 
         if decision["propose_cadence"] and self.propose:
             # Run the proposal vote in the background: this voice keeps living.
@@ -211,8 +211,8 @@ class Voice:
             _, others, forming = await self._context(recent)
             text = await llm.complete_text(
                 self.speak_tier,
-                prompts.speak_system(self.key, self.name, self.spec.text, decision),
-                self._render(recent, strays, others, forming),
+                prompts.speak_system(self.key),
+                self._render(recent, strays, others, forming, extra=prompts.speak_mood(decision)),
                 tier_name="speak", purpose="speak", voice=self.name,
             )
             if text:
@@ -224,50 +224,6 @@ class Voice:
         # The wake flag is NOT cleared here: anything that landed while we were
         # forming triggers one fresh listen against the newest state.
         return decision
-
-    # ------------------------------------------------------------------ samples
-
-    def _sample(self, listen_id: int, system: str, user: str, decision: dict[str, Any]) -> None:
-        """Record listen samples for distillation, off the hot path.
-
-        - Simulator (`record_all_listens`): every listen; the listen tier *is* the teacher.
-        - Live: a `teacher_sample_rate` share also goes to the teacher in the background
-          (the shadow teacher). The voice acts only on the student's decision.
-        """
-        if self.settings.record_all_listens:
-            self._spawn(self._store_sample(listen_id, self.settings.record_all_listens, system,
-                                           user, None, decision))
-        elif self.settings.teacher_sample_rate > 0 and \
-                random.random() < self.settings.teacher_sample_rate:
-            self._spawn(self._shadow(listen_id, system, user, decision))
-
-    async def _shadow(self, listen_id: int, system: str, user: str, student: dict) -> None:
-        try:
-            teacher = normalize_decision(await llm.complete_json(
-                self.settings.teacher_tier, system, user, schema=prompts.LISTEN_SCHEMA,
-                tier_name="teacher", purpose="shadow", voice=self.name,
-            ))
-        except Exception as e:
-            log.warning("shadow teacher failed for %s: %s", self.name, e)
-            return
-        await self._store_sample(listen_id, "live", system, user, student, teacher)
-
-    async def _store_sample(self, listen_id, source, system, user, student, teacher) -> None:
-        t = self.settings.teacher_tier if source == "live" else self.listen_tier
-        try:
-            async with self.score.sessions() as s:
-                s.add(ListenSample(
-                    listen_id=listen_id, source=source,
-                    voice=self.name, system=system, prompt=user,
-                    student_provider=self.listen_tier.provider if student else None,
-                    student_model=self.listen_tier.model if student else None,
-                    student_decision=student,
-                    teacher_provider=t.provider, teacher_model=t.model, teacher_decision=teacher,
-                ))
-                await s.commit()
-        except Exception as e:
-            log.warning("could not store listen sample: %s", e)
-
 
 def normalize_decision(d: dict[str, Any]) -> dict[str, Any]:
     """Coerce a listen reply into the exact schema; models are loose with types."""

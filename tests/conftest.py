@@ -56,7 +56,6 @@ def settings(tmp_path):
         listen_provider="fake", listen_model="fake-listen",
         speak_provider="fake", speak_model="fake-speak",
         mind_dir=tmp_path / "mind", namespace="ptest",
-        teacher_sample_rate=0.0,
         run_senses=False, run_digest=False,
         _env_file=None,
     )

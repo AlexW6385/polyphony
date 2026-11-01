@@ -13,7 +13,6 @@ RUN pip install . && uv tool install mcp-server-fetch
 COPY mind ./mind
 COPY static ./static
 COPY scripts ./scripts
-COPY simulate ./simulate
 
 EXPOSE 8000 8001
 CMD ["python", "-m", "polyphony.main"]

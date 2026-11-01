@@ -1,8 +1,8 @@
 """Model settings saved from the settings page.
 
 One provider, one API key, and two model names: listen (cheap, runs on every new
-thought for every voice) and speak (what voices say, cadences, digests). The teacher
-and the senses follow speak. Nothing saved means `.env` decides, as before.
+thought for every voice, and the cadence rounds) and speak (what voices say, digests).
+The senses follow speak. Nothing saved means `.env` decides, as before.
 
 The saved values live in one `app_settings` row and are applied onto the shared
 `Settings` object: components that read `settings.*_tier` at call time see a change at
@@ -27,7 +27,7 @@ ROW = "runtime"
 KEY_ENV = {"anthropic": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY",
            "deepseek": "DEEPSEEK_API_KEY", "gemini": "GEMINI_API_KEY"}
 PROVIDERS = tuple(KEY_ENV)
-TIERS = ("listen", "speak")  # what the page sets; teacher and sense follow speak
+TIERS = ("listen", "speak")  # what the page sets; senses follow speak
 # Suggestions only: any model name the provider accepts can be typed in.
 MODEL_SUGGESTIONS = {
     "anthropic": ["claude-haiku-5-5", "claude-sonnet-5-5", "claude-opus-5-5", "claude-fable-5-1"],
@@ -63,7 +63,7 @@ def apply(settings: Settings, data: dict[str, Any]) -> None:
     """Overlay saved settings on the `.env` values; an empty `data` restores `.env`."""
     base = env_base(settings)
     provider = data.get("provider")
-    for tier in ("listen", "speak", "teacher", "sense"):
+    for tier in ("listen", "speak", "sense"):
         fields = ("provider", "model", "base_url", "api_key")
         if not provider:
             for f in fields:
@@ -77,7 +77,7 @@ def apply(settings: Settings, data: dict[str, Any]) -> None:
                     getattr(base, f"{tier}_base_url") if same_vendor else "")
             setattr(settings, f"{tier}_api_key", data.get("api_key")
                     or (getattr(base, f"{tier}_api_key") if same_vendor else ""))
-        else:  # teacher, sense: an empty provider means "same as speak"
+        else:  # sense: an empty provider means "same as speak"
             for f in fields:
                 setattr(settings, f"{tier}_{f}", "")
 
@@ -86,7 +86,7 @@ def fingerprint(settings: Settings) -> str:
     """Changes whenever a voice would talk to a different model or key."""
     parts = [(t.provider, t.model, t.base_url,
               hashlib.sha256((t.api_key or "").encode()).hexdigest()[:12])
-             for t in (settings.listen_tier, settings.speak_tier, settings.teacher_tier)]
+             for t in (settings.listen_tier, settings.speak_tier)]
     return json.dumps(parts)
 
 

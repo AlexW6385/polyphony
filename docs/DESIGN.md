@@ -22,12 +22,25 @@ narrowed to that, and its words were changed to one consistent, lightly musical 
 setting and the `council` and `public` examples are gone; the human is always `conscious`);
 memory (embeddings, pgvector retrieval, `/memories`); the waker (no voice is woken after
 quiet: a quiet score is the end of a discussion); `ENABLED_VOICES` (voices are switched on and
-off on the page); local listen by default (listen is `claude-haiku-5-5`, speak
-`claude-sonnet-5-5`; the distillation tooling stays for later). Strays (a few random older
-thoughts) remain.
+off on the page); local models altogether (listen is `claude-haiku-5-5`, speak
+`claude-sonnet-5-5`; the Ollama provider, the shadow teacher, `listen_samples`, the simulator
+and the distillation notebook are gone: listen is about 6% of the cost, so a local student
+would save little). Strays (a few random older thoughts) remain.
 
 **Settings:** one provider, one API key, a listen model and a speak model, on the settings
-page; the teacher and senses follow speak; timings are fixed (digest after 90 s of quiet).
+page; the senses follow speak; the cadence rounds (proposal, standing, vote) run on the listen
+model; timings are fixed (digest after 90 s of quiet).
+
+**Prompt caching.** The system prompt is the key and the engine text only (plus, for a cadence,
+the resolution), so it is the same for every voice. The user message starts with the score,
+also the same for every voice, with absolute times and one cache block per thought; the
+window shows 40 to 59 thoughts and its start moves in steps of 20, so a new thought appends to
+the cached prefix instead of changing it. After a cache break come the voice's text, the time
+now, strays, every voice's latest listen, who is forming, and for speak the mood.
+
+**Discussion style.** Voices talk like people in a meeting: their own view, directly; no
+quoting or citing other thoughts, no repeating what was said, no "I agree" (agreement goes
+into a vote); speak only to add something that matters, and let small details go.
 
 **Senses** run once a day at a fixed local time (`daily_at`, default 04:00, `TIMEZONE`), not
 on an interval, so resuming or restarting never sets one off and none cuts into a discussion

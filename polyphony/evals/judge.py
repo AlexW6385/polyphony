@@ -29,7 +29,7 @@ Reply with one JSON object and nothing else:
 async def judge(tier: TierConfig, *, key: str, voices: dict[str, str], good: str,
                 thoughts: list[dict[str, Any]], digest: str | None) -> dict[str, Any]:
     score_text = "\n".join(
-        prompts._thought_line(t, None) for t in thoughts if t["kind"] != "digest")
+        prompts._thought_line(t) for t in thoughts if t["kind"] != "digest")
     voice_text = "\n\n".join(f"## {n}\n{t}" for n, t in voices.items())
     user = (f"# Key\n{key}\n\n# Voices\n{voice_text}\n\n# A good run\n{good}\n\n"
             f"# Score\n{score_text}\n\n# Digest\n{digest or '(no digest)'}")

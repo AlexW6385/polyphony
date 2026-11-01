@@ -66,7 +66,7 @@ def install_tracer(score: Score) -> None:
             async with score.sessions() as s:
                 s.add(LLMCall(tier=t.tier, provider=t.provider, model=t.model[:128],
                               purpose=t.purpose, voice=t.voice, latency_ms=t.latency_ms,
-                              queue_ms=t.queue_ms, input_tokens=t.input_tokens,
+                              input_tokens=t.input_tokens,
                               output_tokens=t.output_tokens,
                               cached_input_tokens=t.cached_input_tokens, ok=t.ok, error=t.error))
                 await s.commit()

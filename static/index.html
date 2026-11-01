@@ -193,6 +193,12 @@ function cadenceHtml(t) {
     <table class="cadence-table">${rows}</table>`;
 }
 
+// Follow new thoughts only while the reader is at the bottom of the score; if they have
+// scrolled up to read, stay where they are.
+const scoreScroller = () => $("#score").parentElement;
+const nearBottom = (el) => el.scrollHeight - el.scrollTop - el.clientHeight < 60;
+let followScore = true;
+
 function addThought(t) {
   if (seen.has(t.seq)) return;
   seen.add(t.seq);
@@ -212,7 +218,7 @@ function addThought(t) {
   const after = [...score.children].find(c => +c.dataset.seq > t.seq);
   div.dataset.seq = t.seq;
   score.insertBefore(div, after || null);
-  if (!after) div.scrollIntoView({block: "end", behavior: "smooth"});
+  if (!after && followScore) { const el = scoreScroller(); el.scrollTop = el.scrollHeight; }
 }
 
 async function loadHistory() {
@@ -222,6 +228,8 @@ async function loadHistory() {
     batch.forEach(addThought);
   } while (batch.length === 500);
 }
+
+scoreScroller().addEventListener("scroll", () => { followScore = nearBottom(scoreScroller()); });
 
 function connect() {
   const es = new EventSource(`/score?after=${lastSeq}`);

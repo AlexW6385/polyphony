@@ -19,7 +19,7 @@ from . import digest as digest_mod
 from . import llm, runtime_config
 from .cadence import confirm_cadence, create_cadence, get_cadence, run_cadence
 from .config import Settings
-from .db import KeyRow, LLMCall, ListenSample, SenseRow, VoiceRow
+from .db import KeyRow, LLMCall, SenseRow, VoiceRow
 from .key import CONSCIOUS, KEY_ROW, get_key
 from .sense import DEFAULT_DAILY_AT, Sense, SenseSpec, check_daily_at
 from .score import Score
@@ -375,9 +375,7 @@ def create_app(score: Score, settings: Settings, lifespan=None) -> FastAPI:
                        func.count(), func.count().filter(LLMCall.ok.is_(False)),
                        func.sum(LLMCall.input_tokens), func.sum(LLMCall.output_tokens),
                        func.sum(LLMCall.cached_input_tokens), func.avg(LLMCall.latency_ms),
-                       func.percentile_cont(0.95).within_group(LLMCall.latency_ms),
-                       func.avg(LLMCall.queue_ms),
-                       func.percentile_cont(0.95).within_group(LLMCall.queue_ms))
+                       func.percentile_cont(0.95).within_group(LLMCall.latency_ms))
                 .where(LLMCall.created_at >= since)
                 .group_by(LLMCall.tier, LLMCall.provider, LLMCall.model)
             )).all()
@@ -397,23 +395,12 @@ def create_app(score: Score, settings: Settings, lifespan=None) -> FastAPI:
                 select(LLMCall).where(LLMCall.created_at >= since, LLMCall.ok.is_(False))
                 .order_by(LLMCall.id.desc()).limit(10)
             )).all()
-            samples = (await s.scalars(
-                select(ListenSample).where(ListenSample.source == "live",
-                                           ListenSample.created_at >= since,
-                                           ListenSample.student_decision.isnot(None),
-                                           ListenSample.teacher_decision.isnot(None))
-            )).all()
         tiers = [{
             "tier": r[0], "provider": r[1], "model": r[2], "calls": r[3],
             "errors": int(r[4] or 0), "input_tokens": int(r[5] or 0),
             "output_tokens": int(r[6] or 0), "cached_input_tokens": int(r[7] or 0),
             "latency_ms_avg": round(float(r[8] or 0)), "latency_ms_p95": round(float(r[9] or 0)),
-            "queue_ms_avg": None if r[10] is None else round(float(r[10])),
-            "queue_ms_p95": None if r[11] is None else round(float(r[11])),
         } for r in rows]
-        from .distill import agreement
-
-        pairs = [(x.student_decision, x.teacher_decision) for x in samples]
         by_purpose = [{"purpose": r[0], "calls": r[1], "errors": int(r[2] or 0),
                        "tokens": int(r[3] or 0) + int(r[4] or 0)} for r in purposes]
         recent_errors = [{"at": f.created_at.isoformat() if f.created_at else None,
@@ -423,7 +410,7 @@ def create_app(score: Score, settings: Settings, lifespan=None) -> FastAPI:
                   for r in timeline]
         return {"hours": hours, "tiers": tiers, "by_purpose": by_purpose,
                 "timeline": {"unit": unit, "since": since.isoformat(), "points": series},
-                "recent_errors": recent_errors, "student_teacher": agreement(pairs)}
+                "recent_errors": recent_errors}
 
     # ------------------------------------------------------------------ senses
 

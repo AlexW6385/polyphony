@@ -22,18 +22,20 @@ from .conftest import voice_name
 
 
 def stream_lines(user: str) -> list[str]:
-    return user.split("## The score (oldest first)")[1].strip().splitlines()
+    """The score part of a (plain-text) user message."""
+    return user.split("## The score (oldest first)")[1].split("## Now")[0].strip().splitlines()
 
 
 def polite_script():
     """Speak once per new conscious thought, then get bored."""
 
     async def script(system, user, json):
-        me = voice_name(system)
+        me = voice_name(user)
         if "Right now you are only listening" in system:
             lines = stream_lines(user)
             last_conscious = max((i for i, l in enumerate(lines) if "[theme]" in l), default=-1)
-            spoke_since = any(f"{me} (you)" in l for l in lines[last_conscious + 1:])
+            spoke_since = any(f"] {me}:" in l or f"] {me} (" in l
+                              for l in lines[last_conscious + 1:])
             if last_conscious >= 0 and not spoke_since:
                 return _j(speak=True, mood="curious", reason="new thought", pause_seconds=0)
             return _j(speak=False, mood="bored", reason="said my piece", pause_seconds=0)
@@ -137,7 +139,7 @@ async def test_cadence_two_rounds(score, settings, fake):
     await add_voices(score, "ride", "rest")
 
     async def script(system, user, json):
-        me = voice_name(system)
+        me = voice_name(user)
         if "First round: standing" in system:
             return _j(weights={"ride": {"weight": 0.9, "why": "stake"},
                                "rest": {"weight": 0.3, "why": "meh"}})
@@ -160,7 +162,7 @@ async def test_cadence_proposal_rejected(score, settings, fake):
 
     async def script(system, user, json):
         assert "is this worth deciding now" in system
-        return _j(yes=voice_name(system) == "ride", reason="r")
+        return _j(yes=voice_name(user) == "ride", reason="r")
 
     fake.script = script
     out = await cad.propose_cadence(score, settings, "ride", "go now")

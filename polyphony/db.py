@@ -193,36 +193,11 @@ class LLMCall(Base):
     purpose: Mapped[str] = mapped_column(String(32))
     voice: Mapped[str | None] = mapped_column(String(64), nullable=True)
     latency_ms: Mapped[int] = mapped_column(Integer)
-    queue_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
     input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     cached_input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
     ok: Mapped[bool] = mapped_column(Boolean)
     error: Mapped[str | None] = mapped_column(Text, nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-
-
-class ListenSample(Base):
-    """A listen input with the student's and/or the teacher's decision.
-
-    `source` is `live` (shadow teacher on real runs) or `synthetic` (self-play).
-    """
-
-    __tablename__ = "listen_samples"
-    __table_args__ = (Index("ix_listen_samples_source_id", "source", "id"),)
-
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    listen_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
-    source: Mapped[str] = mapped_column(String(16))
-    voice: Mapped[str] = mapped_column(String(64))
-    system: Mapped[str] = mapped_column(Text)
-    prompt: Mapped[str] = mapped_column(Text)
-    student_provider: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    student_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    student_decision: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
-    teacher_provider: Mapped[str | None] = mapped_column(String(32), nullable=True)
-    teacher_model: Mapped[str | None] = mapped_column(String(128), nullable=True)
-    teacher_decision: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 

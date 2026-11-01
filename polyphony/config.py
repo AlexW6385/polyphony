@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 class TierConfig(BaseModel):
-    """Which provider/model a tier (listen, speak, sense, teacher) talks to."""
+    """Which provider/model a tier (listen, speak, sense) talks to."""
 
     provider: str
     model: str
@@ -27,12 +27,12 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+asyncpg://polyphony:polyphony@localhost:5432/polyphony"
     redis_url: str = "redis://localhost:6379/0"
-    namespace: str = "polyphony"  # prefix of every Redis key; isolates evals/simulator runs
+    namespace: str = "polyphony"  # prefix of every Redis key; isolates eval runs
 
     # The key, voices and senses the database is seeded from on first start.
     mind_dir: Path = ROOT / "mind"
 
-    # listen: hot path, local small model by default (the "student").
+    # listen: hot path, every new thought for every voice, and the cadence rounds.
     listen_provider: str = "anthropic"
     listen_model: str = "claude-haiku-5-5"
     listen_base_url: str = ""
@@ -48,15 +48,6 @@ class Settings(BaseSettings):
     sense_model: str = ""
     sense_base_url: str = ""
     sense_api_key: str = ""
-
-    # Teacher: labels a sample of listens in the background. Empty = speak tier.
-    teacher_provider: str = ""
-    teacher_model: str = ""
-    teacher_base_url: str = ""
-    teacher_api_key: str = ""
-    teacher_sample_rate: float = 0.05
-    # Simulator: record every listen as a sample with this source (e.g. "synthetic").
-    record_all_listens: str = ""
 
     # Digest: quiet this long (no new thought, nobody forming) -> write a digest.
     digest_idle_seconds: float = 90.0
@@ -82,7 +73,7 @@ class Settings(BaseSettings):
     api_url: str = "http://127.0.0.1:8000"
 
     pause_scale: float = 1.0  # simulator: shrink voices' pause_seconds to run faster
-    recent_window: int = 40
+    recent_window: int = 60  # what Redis keeps; prompts show 40-59 (see prompts.cache_window)
     strays: int = 4
     host: str = "127.0.0.1"  # compose sets 0.0.0.0 inside the container, published on 127.0.0.1
     port: int = 8000
@@ -132,10 +123,6 @@ class Settings(BaseSettings):
     @property
     def sense_tier(self) -> TierConfig:
         return self._tier("sense", self.speak_tier)
-
-    @property
-    def teacher_tier(self) -> TierConfig:
-        return self._tier("teacher", self.speak_tier)
 
 
 @lru_cache

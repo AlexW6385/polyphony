@@ -4,11 +4,16 @@ Principle: give as much information as possible, prescribe as little as
 possible. Everything behavioural (speak or not, boredom, stopping, drift) is
 left to the model here, never enforced in code.
 
-Every system prompt is ordered from most shared to least shared, so the prefix
-is identical across voices and providers' prompt caches (and Ollama's KV
-cache) hit:
+Every request is ordered from most shared to least shared, so providers' prompt caches
+hit across voices and across calls:
 
-    key text  ->  engine text (same for every voice)  ->  voice text  ->  per-call details
+    system:  key text -> engine text (and, for a cadence, the resolution)   same for every voice
+    user:    the score, oldest first, one cache chunk per thought           same for every voice
+             ---- cache break ----
+             voice text, now, strays, every voice's latest listen, forming, mood
+
+The score uses absolute times (and its window moves in steps of `WINDOW_STEP`), so a
+new thought only appends to the cached prefix instead of changing it.
 
 The key is the only place that says what this polyphony *is*. Engine text is
 framing-neutral: it never mentions minds, heads, people or groups.
@@ -18,8 +23,13 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from .key import CONSCIOUS, Key
+from .llm import CACHE_BREAK, CHUNK
+
+WINDOW_KEEP = 40  # the score shows at least this many recent thoughts...
+WINDOW_STEP = 20  # ...and its start moves in steps of this many, so the prefix stays cached
 
 # --------------------------------------------------------------------------- building blocks
 
@@ -39,11 +49,8 @@ happening now, and not lines to reuse.
 </voice>"""
 
 
-def _compose(key: Key, engine: str, name: str | None = None, text: str | None = None,
-             details: str | None = None) -> str:
+def _compose(key: Key, engine: str, details: str | None = None) -> str:
     parts = [_key_block(key), engine.strip()]
-    if name is not None:
-        parts.append(_voice_block(name, text or ""))
     if details:
         parts.append(details.strip())
     return "\n\n".join(parts)
@@ -51,11 +58,13 @@ def _compose(key: Key, engine: str, name: str | None = None, text: str | None = 
 
 _ENGINE_COMMON = """\
 Several voices share one score of thoughts. There is no conductor: each voice decides for
-itself when to speak. The voices are in one conversation: respond to what is being said in the
-score, and let who you are show in how you respond, not in topics of your own. A [cadence]
-thought records a vote: once a resolution has passed, treat it as decided and build on it rather
-than arguing it again. Say things plainly: do not invent facts that are not in the score, and do
-not dress things up with sentiment or imagery."""
+itself when to speak. The voices are in one discussion, like a meeting: stay on what was
+brought in and say your own view directly. Do not quote or cite other thoughts, do not
+repeat what has already been said, and do not say you agree; agreement belongs in a vote. Speak
+only when you add something new that matters to the question, and let small details go. A
+[cadence] thought records a vote: once a resolution has passed, treat it as decided and build on
+it rather than arguing it again. Say things plainly: do not invent facts that are not in the
+score, and do not dress things up with sentiment or imagery."""
 
 # --------------------------------------------------------------------------- listen
 
@@ -92,45 +101,54 @@ LISTEN_SCHEMA: dict[str, Any] = {
 SPEAK_ENGINE = f"""\
 {_ENGINE_COMMON}
 
-You decided to speak. Say what you want to say, as yourself, the way you would say it out loud.
+You decided to speak. Say what you want to say, as yourself, briefly, the way you would say it
+out loud in a meeting.
 Output only the thought, without your name in front. The score may have moved while you waited:
 if what you meant to say has been said, or the moment has passed, output nothing."""
 
 
-def listen_system(key: Key, name: str, text: str) -> str:
-    return _compose(key, LISTEN_ENGINE, name, text)
+def listen_system(key: Key) -> str:
+    return _compose(key, LISTEN_ENGINE)
 
 
-def speak_system(key: Key, name: str, text: str, decision: dict[str, Any]) -> str:
+def speak_system(key: Key) -> str:
+    return _compose(key, SPEAK_ENGINE)
+
+
+def speak_mood(decision: dict[str, Any]) -> str:
     # Only the mood carries over. Feeding the listen's reason back made Sonnet's classifier
     # decline speak calls as reasoning extraction.
-    details = f'Your mood right now: {decision.get("mood") or "unspecified"}.'
-    return _compose(key, SPEAK_ENGINE, name, text, details)
+    return f'Your mood right now: {decision.get("mood") or "unspecified"}.'
 
 
 # --------------------------------------------------------------------------- render
 
 
-def _ago(created_at: str | None, now: datetime) -> str:
+def cache_window(recent: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The recent thoughts to show: at least WINDOW_KEEP, starting at a multiple of WINDOW_STEP.
+
+    A window that slid by one thought on every new thought would change the start of the
+    prompt each time and nothing would stay cached.
+    """
+    if not recent:
+        return recent
+    base = max(0, (recent[-1]["seq"] - WINDOW_KEEP) // WINDOW_STEP * WINDOW_STEP)
+    return [t for t in recent if t["seq"] > base]
+
+
+def _at(created_at: str | None, tz: str) -> str:
     if not created_at:
         return ""
     try:
         t = datetime.fromisoformat(created_at)
     except ValueError:
         return ""
-    s = max(0, int((now - t).total_seconds()))
-    for unit, n in (("day", 86400), ("hour", 3600), ("minute", 60), ("second", 10)):
-        if s >= n:
-            k = s // n if n > 10 else s
-            return f", {k} {unit}{'s' if k > 1 else ''} ago"
-    return ", just now"
+    return t.astimezone(ZoneInfo(tz)).strftime("%Y-%m-%d %H:%M")
 
 
-def _thought_line(t: dict[str, Any], me: str | None, now: datetime | None = None) -> str:
+def _thought_line(t: dict[str, Any], tz: str = "UTC") -> str:
     author = t["author"]
     kind = t["kind"]
-    if kind == "voice" and author == me:
-        author = f"{author} (you)"
     if kind == "theme":
         tag, author = "[theme] ", CONSCIOUS
     elif kind != "voice":
@@ -138,8 +156,8 @@ def _thought_line(t: dict[str, Any], me: str | None, now: datetime | None = None
     else:
         tag = ""
     mood = f" ({t['mood']})" if t.get("mood") else ""
-    ago = _ago(t.get("created_at"), now or datetime.now(timezone.utc))
-    return f"[{t['seq']}{ago}] {tag}{author}{mood}: {t['content']}"
+    at = _at(t.get("created_at"), tz)
+    return f"[{t['seq']}{' · ' + at if at else ''}] {tag}{author}{mood}: {t['content']}"
 
 
 def render(
@@ -148,14 +166,25 @@ def render(
     others: dict[str, dict[str, Any]],
     forming: list[str],
     me: str | None,
+    *,
+    voice_text: str | None = None,
+    extra: str | None = None,
+    tz: str = "UTC",
 ) -> str:
-    now = datetime.now(timezone.utc)
-    parts: list[str] = []
+    """The user message: the score (shared, cached) then what is particular to this call."""
+    score = ["## The score (oldest first)\n"]
+    score += [_thought_line(t, tz) + "\n" for t in recent] or ["(empty)\n"]
 
-    parts.append("## Stray thoughts (older, surfacing at random)")
-    parts.extend([_thought_line(t, me, now) for t in strays] or ["(none)"])
+    tail: list[str] = []
+    if me is not None and voice_text is not None:
+        tail.append(_voice_block(me, voice_text) + "\n")
+    now = datetime.now(timezone.utc).astimezone(ZoneInfo(tz)).strftime("%Y-%m-%d %H:%M")
+    tail.append(f"## Now\n{now} ({tz})")
 
-    parts.append("\n## Latest listen of every voice")
+    tail.append("\n## Stray thoughts (older, surfacing at random)")
+    tail.extend([_thought_line(t, tz) for t in strays] or ["(none)"])
+
+    tail.append("\n## Latest listen of every voice")
     if others:
         for name, l in others.items():
             act = "spoke" if l.get("speak") else "rest"
@@ -163,18 +192,17 @@ def render(
             # voices fall quiet together, and replaying them invites reasoning-extraction
             # declines from the speak model.
             who = f"{name} (you)" if name == me else name
-            parts.append(f'{who}: {act} — {l.get("mood") or "?"} (at [{l.get("trigger_seq")}])')
+            tail.append(f'{who}: {act} — {l.get("mood") or "?"} (at [{l.get("trigger_seq")}])')
     else:
-        parts.append("(nobody has listened yet)")
+        tail.append("(nobody has listened yet)")
 
-    parts.append("\n## Forming a thought right now")
+    tail.append("\n## Forming a thought right now")
     others_forming = [f for f in forming if f != me]
-    parts.append(", ".join(others_forming) if others_forming else "(nobody)")
+    tail.append(", ".join(others_forming) if others_forming else "(nobody)")
+    if extra:
+        tail.append("\n" + extra.strip())
 
-    parts.append("\n## The score (oldest first)")
-    parts.extend([_thought_line(t, me, now) for t in recent] or ["(empty)"])
-
-    return "\n".join(parts)
+    return CHUNK.join(score) + CACHE_BREAK + "\n".join(tail)
 
 
 # --------------------------------------------------------------------------- cadence
@@ -186,7 +214,7 @@ A cadence is a formal decision procedure: a resolution is posed, the voices weig
 vote, and the result is recorded in the score. What a cadence means is up to the key."""
 
 
-def proposal_system(key: Key, name: str, text: str, proposer: str, resolution: str) -> str:
+def proposal_system(key: Key, proposer: str, resolution: str) -> str:
     details = f"""\
 Another voice ({proposer}) has proposed holding a cadence on this resolution:
 
@@ -197,11 +225,10 @@ Before any vote happens, every voice answers a simpler question: is this worth d
 
 Reply with one JSON object and nothing else:
 {{"yes": true|false, "reason": "one line"}}"""
-    return _compose(key, CADENCE_ENGINE, name, text, details)
+    return _compose(key, CADENCE_ENGINE, details)
 
 
-def standing_system(key: Key, name: str, text: str, resolution: str,
-                    voices: list[str]) -> str:
+def standing_system(key: Key, resolution: str, voices: list[str]) -> str:
     details = f"""\
 A cadence is running on this resolution:
 
@@ -216,11 +243,10 @@ Voices: {", ".join(voices)}
 Reply with one JSON object and nothing else, mapping each voice name to its weight and a one-line
 why:
 {{"weights": {{"<voice>": {{"weight": 0.0-1.0, "why": "one line"}}, ...}}}}"""
-    return _compose(key, CADENCE_ENGINE, name, text, details)
+    return _compose(key, CADENCE_ENGINE, details)
 
 
-def vote_system(key: Key, name: str, text: str, resolution: str,
-                weights: dict[str, float]) -> str:
+def vote_system(key: Key, resolution: str, weights: dict[str, float]) -> str:
     w = "\n".join(f"- {v}: {x:.2f}" for v, x in weights.items())
     details = f"""\
 A cadence is running on this resolution:
@@ -235,7 +261,7 @@ reason in your own voice.
 
 Reply with one JSON object and nothing else:
 {{"vote": "for" | "against" | "abstain", "reason": "one line"}}"""
-    return _compose(key, CADENCE_ENGINE, name, text, details)
+    return _compose(key, CADENCE_ENGINE, details)
 
 
 # --------------------------------------------------------------------------- digest

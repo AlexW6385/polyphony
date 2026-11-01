@@ -67,7 +67,7 @@ class Run:
         await self.engine.dispose()
 
 
-async def open_run(settings: Settings, *, keep_samples: bool = True) -> Run:
+async def open_run(settings: Settings) -> Run:
     from .main import install_tracer, seed
 
     await ensure_database(settings.database_url)

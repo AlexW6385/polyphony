@@ -100,8 +100,8 @@ def build(score: Score, settings: Settings):
         specs = await load_voice_specs(score.sessions, settings)
         names = [s.name for s in specs]
         answers = await asyncio.gather(*[
-            ask(score, settings, key, s, "speak",
-                prompts.standing_system(key, s.name, s.text, state["resolution"], names),
+            ask(score, settings, key, s, "listen",
+                prompts.standing_system(key, state["resolution"], names),
                 "standing")
             for s in specs
         ])
@@ -118,8 +118,8 @@ def build(score: Score, settings: Settings):
         specs = [s for s in await load_voice_specs(score.sessions, settings)
                  if s.name in state["names"]]
         answers = await asyncio.gather(*[
-            ask(score, settings, key, s, "speak",
-                prompts.vote_system(key, s.name, s.text, state["resolution"], state["weights"]),
+            ask(score, settings, key, s, "listen",
+                prompts.vote_system(key, state["resolution"], state["weights"]),
                 "vote")
             for s in specs
         ])

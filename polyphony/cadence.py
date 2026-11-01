@@ -28,9 +28,10 @@ from .voice import VoiceSpec, load_voice_specs
 log = logging.getLogger(__name__)
 
 
-async def _context(score: Score, key: Key, me: str) -> str:
-    recent = await score.recent()
-    return prompts.render(recent, [], await score.listens_latest(), await score.forming(), me)
+async def _context(score: Score, settings: Settings, spec: VoiceSpec) -> str:
+    recent = prompts.cache_window(await score.recent())
+    return prompts.render(recent, [], await score.listens_latest(), await score.forming(),
+                          spec.name, voice_text=spec.text, tz=settings.timezone)
 
 
 async def ask(score: Score, settings: Settings, key: Key, spec: VoiceSpec, tier_name: str,
@@ -38,7 +39,7 @@ async def ask(score: Score, settings: Settings, key: Key, spec: VoiceSpec, tier_
     base = settings.listen_tier if tier_name == "listen" else settings.speak_tier
     tier = llm.resolve_tier(base, spec.overrides.get(tier_name))
     try:
-        return await llm.complete_json(tier, system, await _context(score, key, spec.name),
+        return await llm.complete_json(tier, system, await _context(score, settings, spec),
                                        temperature=0.5, tier_name=tier_name, purpose=purpose,
                                        voice=spec.name)
     except Exception:
@@ -199,7 +200,7 @@ async def _propose(score: Score, settings: Settings, proposer: str, resolution: 
     specs = await load_voice_specs(score.sessions, settings)
     answers = await asyncio.gather(*[
         ask(score, settings, key, s, "listen",
-            prompts.proposal_system(key, s.name, s.text, proposer, resolution), "proposal")
+            prompts.proposal_system(key, proposer, resolution), "proposal")
         for s in specs
     ])
     ballots = {}

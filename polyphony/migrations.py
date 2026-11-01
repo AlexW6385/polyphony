@@ -23,14 +23,13 @@ STEPS: list[tuple[str, str]] = [
      "ALTER TABLE senses ADD COLUMN IF NOT EXISTS feeds JSONB NOT NULL DEFAULT '[]'"),
     ("senses.search",
      "ALTER TABLE senses ADD COLUMN IF NOT EXISTS search BOOLEAN NOT NULL DEFAULT false"),
-    ("llm_calls.queue_ms", "ALTER TABLE llm_calls ADD COLUMN IF NOT EXISTS queue_ms INTEGER"),
+    ("llm_calls.queue_ms", "ALTER TABLE llm_calls DROP COLUMN IF EXISTS queue_ms"),
+    ("drop listen_samples (no local listen)", "DROP TABLE IF EXISTS listen_samples"),
     ("drop thought_embeddings", "DROP TABLE IF EXISTS thought_embeddings"),
     ("senses.daily_at",
      "ALTER TABLE senses ADD COLUMN IF NOT EXISTS daily_at VARCHAR(5) NOT NULL DEFAULT '04:00'"),
     ("senses.every_minutes", "ALTER TABLE senses DROP COLUMN IF EXISTS every_minutes"),
     ("drop frames (now keys, reseeded from mind/key.md)", "DROP TABLE IF EXISTS frames"),
-    ("listen_samples.ensemble",
-     "ALTER TABLE listen_samples DROP COLUMN IF EXISTS ensemble"),
 ]
 
 

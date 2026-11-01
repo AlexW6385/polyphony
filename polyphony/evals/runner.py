@@ -44,7 +44,7 @@ def load_scenarios(only: list[str] | None = None) -> dict[str, dict[str, Any]]:
 
 async def run_scenario(name: str, sc: dict[str, Any]) -> dict[str, Any]:
     base = get_settings()
-    settings = isolated(base, "eval", teacher_sample_rate=0.0)
+    settings = isolated(base, "eval")
     budget = sc.get("budget") or {}
     run = await open_run(settings)
     try:
@@ -60,7 +60,7 @@ async def run_scenario(name: str, sc: dict[str, Any]) -> dict[str, Any]:
             cost = (await s.execute(select(func.count(), func.sum(LLMCall.input_tokens),
                                            func.sum(LLMCall.output_tokens))
                                     .where(LLMCall.purpose != "judge"))).one()
-        verdict = await judge(base.teacher_tier, key=key.text, voices=voices,
+        verdict = await judge(base.speak_tier, key=key.text, voices=voices,
                               good=sc.get("good", ""), thoughts=thoughts,
                               digest=digest["content"] if digest else None)
         return {
@@ -115,7 +115,7 @@ async def cli() -> None:
     out.write_text(json.dumps({
         "created_at": datetime.now().astimezone().isoformat(),
         "models": {"listen": s.listen_tier.model, "speak": s.speak_tier.model,
-                   "judge": s.teacher_tier.model},
+                   "judge": s.speak_tier.model},
         "results": results,
     }, indent=2))
     print(f"wrote {out}")

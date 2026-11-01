@@ -7,7 +7,7 @@ import pytest
 from polyphony import prompts
 from polyphony.cadence import average_weights, tally
 from polyphony.config import TierConfig
-from polyphony.llm import LLMError, extract_json, resolve_tier
+from polyphony.llm import CACHE_BREAK, CHUNK, LLMError, extract_json, resolve_tier
 from polyphony.sense import fingerprints
 from polyphony.voice import VoiceSpec, normalize_decision, repeats_proposal
 
@@ -36,10 +36,10 @@ def test_resolve_tier_falls_back_and_switches_provider():
 
 
 def test_voice_described_with_front_matter():
-    text, meta = VoiceSpec.parse("---\nlisten: { provider: ollama, model: qwen2.5:3b }\n---\n"
+    text, meta = VoiceSpec.parse("---\nlisten: { provider: deepseek, model: deepseek-chat }\n---\n"
                                  "**Wants** — rest.")
     assert text == "**Wants** — rest."
-    assert meta == {"listen": {"provider": "ollama", "model": "qwen2.5:3b"}}
+    assert meta == {"listen": {"provider": "deepseek", "model": "deepseek-chat"}}
 
 
 def test_voice_shown_with_empty_front_matter():
@@ -118,22 +118,49 @@ def test_render_marks_self_and_kinds():
         {"seq": 2, "author": "rest", "kind": "voice", "content": "tired", "mood": "flat"},
     ]
     listens = {"rest": {"speak": False, "mood": "tired", "reason": "third loop", "trigger_seq": 2}}
-    out = prompts.render(recent, [], listens, ["make"], "rest")
+    out = prompts.render(recent, [], listens, ["make"], "rest", voice_text="**Wants** — rest.")
     assert "[1] [theme] conscious: hi" in out
-    assert "[2] rest (you) (flat): tired" in out
+    assert "[2] rest (flat): tired" in out  # the score is the same for every voice
     assert "rest (you): rest — tired (at [2])" in out
+    assert 'Your name is "rest"' in out.split(CACHE_BREAK)[1]
     assert "third loop" not in out
     assert "make" in out.split("## Forming a thought right now")[1]
 
 
 def test_prompt_prefix_is_shared_across_voices():
+    from datetime import datetime, timezone
+
     from polyphony.key import Key
 
-    f = Key(text="A key.")
-    a = prompts.listen_system(f, "rest", "**Wants** — rest.")
-    b = prompts.listen_system(f, "make", "**Wants** — ship.")
-    prefix = a[: a.index('Your name is')]
-    assert b.startswith(prefix) and "A key." in prefix and "only listening" in prefix
+    k = Key(text="A key.")
+    assert "A key." in prompts.listen_system(k) and "only listening" in prompts.listen_system(k)
+    now = datetime.now(timezone.utc).isoformat()
+    recent = [{"seq": i, "author": "a", "kind": "voice", "content": str(i), "mood": None,
+               "created_at": now} for i in range(1, 6)]
+    a = prompts.render(recent, [], {}, [], "rest", voice_text="**Wants** — rest.")
+    b = prompts.render(recent, [], {}, ["rest"], "make", voice_text="**Wants** — ship.")
+    # system and score are identical for every voice; only what follows the break differs
+    assert a.split(CACHE_BREAK)[0] == b.split(CACHE_BREAK)[0]
+    assert a.split(CACHE_BREAK)[1] != b.split(CACHE_BREAK)[1]
+
+
+def test_cache_window_moves_in_steps():
+    seqs = lambda n: [{"seq": i} for i in range(1, n + 1)]
+    assert [t["seq"] for t in prompts.cache_window(seqs(30))] == list(range(1, 31))
+    shown = [t["seq"] for t in prompts.cache_window(seqs(75))]
+    assert shown[0] == 21 and shown[-1] == 75  # starts on a step, keeps at least 40
+    assert prompts.cache_window(seqs(79))[0]["seq"] == 21  # same start: prefix still cached
+    assert prompts.cache_window(seqs(80))[0]["seq"] == 41
+
+
+def test_anthropic_content_marks_the_shared_prefix():
+    from polyphony.llm import anthropic_content, plain
+
+    user = prompts.render([{"seq": 1, "author": "a", "kind": "voice", "content": "x",
+                            "mood": None}], [], {}, [], "a", voice_text="v")
+    blocks = anthropic_content(user)
+    assert blocks[-2]["cache_control"] == {"type": "ephemeral"} and "cache_control" not in blocks[-1]
+    assert CACHE_BREAK not in plain(user) and CHUNK not in plain(user)
 
 
 def test_engine_text_is_framing_neutral():
@@ -141,17 +168,6 @@ def test_engine_text_is_framing_neutral():
                  prompts.DIGEST_ENGINE, prompts.SENSE_ENGINE):
         low = text.lower()
         assert not any(w in low for w in (" mind", " head", "people", "groups")), text[:60]
-
-
-def test_agreement_metrics():
-    from polyphony.distill import agreement
-
-    pairs = [({"speak": True}, {"speak": True}), ({"speak": False}, {"speak": True}),
-             ({"speak": False}, {"speak": False}), ({"speak": True}, {"speak": False}),
-             (None, {"speak": True})]
-    m = agreement(pairs)
-    assert m["n"] == 4 and m["accuracy"] == 0.5
-    assert m["precision_speak"] == 0.5 and m["recall_speak"] == 0.5
 
 
 def test_feeds_ssrf_guard_blocks_private_addresses():
@@ -165,20 +181,12 @@ def test_feeds_ssrf_guard_blocks_private_addresses():
             asyncio.run(check_url(url))
 
 
-def test_render_shows_how_long_ago():
-    from datetime import datetime, timedelta, timezone
-
-    now = datetime.now(timezone.utc)
-    recent = [
-        {"seq": 1, "author": "doubt", "kind": "voice", "content": "old", "mood": None,
-         "created_at": (now - timedelta(days=3)).isoformat()},
-        {"seq": 2, "author": "doubt", "kind": "voice", "content": "new", "mood": None,
-         "created_at": (now - timedelta(seconds=30)).isoformat()},
-    ]
-    out = prompts.render(recent, [], {}, [], None)
-    assert "[1, 3 days ago] doubt: old" in out
-    assert "[2, 30 seconds ago] doubt: new" in out
-
+def test_render_shows_absolute_times_and_now():
+    recent = [{"seq": 1, "author": "doubt", "kind": "voice", "content": "old", "mood": None,
+               "created_at": "2026-10-29T12:40:00+00:00"}]
+    out = prompts.render(recent, [], {}, [], None, tz="America/Toronto")
+    assert "[1 · 2026-10-29 08:40] doubt: old" in out  # local time, never "3 days ago"
+    assert "## Now" in out.split(CACHE_BREAK)[1] and "(America/Toronto)" in out
 
 def test_runtime_config_overrides_env_and_restores_it(settings):
     from polyphony import runtime_config as rc
@@ -189,7 +197,7 @@ def test_runtime_config_overrides_env_and_restores_it(settings):
     rc.apply(settings, data)
     assert (settings.listen_tier.provider, settings.listen_tier.model) == ("anthropic", "claude-haiku-5-5")
     assert settings.speak_tier.api_key == settings.listen_tier.api_key == "sk-test-1234"
-    assert settings.teacher_tier.model == "claude-sonnet-5-5"  # teacher and sense follow speak
+    assert settings.sense_tier.model == "claude-sonnet-5-5"  # senses follow speak
     assert settings.sense_tier.provider == "anthropic"
     view = rc.view(settings, data)
     assert view["api_key"] == {"set": True, "source": "page", "hint": "…1234"}
@@ -227,3 +235,32 @@ def test_sense_runs_at_the_next_daily_time_only():
     assert check_daily_at("4:05") == "04:05"
     with pytest.raises(ValueError):
         check_daily_at("24:00")
+
+
+async def test_anthropic_request_is_cached_and_has_room_to_think():
+    from types import SimpleNamespace
+
+    from polyphony import llm
+
+    sent = {}
+
+    async def create(**kw):
+        sent.update(kw)
+        return SimpleNamespace(
+            content=[SimpleNamespace(type="text", text='{"speak": false}')], stop_reason="end_turn",
+            usage=SimpleNamespace(input_tokens=1, output_tokens=1, cache_read_input_tokens=0,
+                                  cache_creation_input_tokens=0))
+
+    p = llm.AnthropicProvider(None, "test-key")
+    p.client.messages.create = create
+    p.client.beta.messages.create = create
+    user = prompts.render([{"seq": 1, "author": "a", "kind": "voice", "content": "x",
+                            "mood": None}], [], {}, [], "a", voice_text="v")
+    await p.complete(model="claude-haiku-5-5", system="sys", user=user, json=True)
+    assert sent["max_tokens"] >= llm.ANTHROPIC_MIN_MAX_TOKENS
+    assert sent["output_config"] == {"effort": "low"}
+    assert sent["system"][0]["cache_control"] == {"type": "ephemeral"}
+    assert any("cache_control" in b for b in sent["messages"][0]["content"])
+    assert "fallbacks" not in sent  # Haiku has no server-side fallback
+    await p.complete(model="claude-sonnet-5-5", system="sys", user=user)
+    assert sent["fallbacks"] == "default"

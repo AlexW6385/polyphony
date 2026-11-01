@@ -46,7 +46,7 @@ async def write_digest(score: Score, settings: Settings) -> dict[str, Any] | Non
     if not any(t["kind"] == "voice" for t in thoughts):
         return None
     key = await get_key(score.sessions)
-    user = prompts.render(thoughts, [], {}, [], None)
+    user = prompts.render(thoughts, [], {}, [], None, tz=settings.timezone)
     text = await llm.complete_text(settings.speak_tier, prompts.digest_system(key), user,
                                    temperature=0.3, max_tokens=1200, tier_name="speak",
                                    purpose="digest")
