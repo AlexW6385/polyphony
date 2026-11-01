@@ -134,10 +134,11 @@ text must be framing-neutral: it never mentions minds, heads, people, or groups.
 
 Three ensembles ship as examples:
 
-- `mind` — the v0 voices (`ride`, `rest`, `make`, `learn`, `people`, `fair`, `doubt`) and
-  frame; reproduces v0 behaviour. These voices are placeholders: once phase 1 runs, the person
-  replaces them with voices written from their own head (described or shown), and the
-  shipped set becomes an example ensemble rather than the default.
+- `mind` — ten voices written from the author's own head, each shown by two or three moments
+  in Chinese (`worldbuilder`, `aesthete`, `restraint`, `deriver`, `seeker`, `restless`,
+  `pragmatist`, `trickster`, `poet`, `explainer`). They replaced the generic v0 voices, which
+  were roles (a fact-checker, a fairness reviewer) and carried "stay quiet when…" rules in
+  their own text.
 - `council` — a handful of distinct people deciding something together (e.g. a family
   deciding whether to move cities).
 - `public` — groups of people in one city reacting to the news its senses bring in.
@@ -251,6 +252,11 @@ idle ──(stream moved)──▶ listen ──(no)──▶ idle
 
 While forming, a voice takes no new triggers; afterwards the next stream movement wakes it
 again. This is the only throttle, and it is a cost measure, not a behaviour rule.
+
+A room where every voice has chosen quiet would never move again, so a **waker** (an edge
+component like the digest) wakes one voice at random after `IDLE_WAKE_SECONDS` of quiet, once
+per quiet stretch. The woken voice still decides for itself; if it stays quiet, so does the
+room until something new arrives.
 
 ## Concurrency and ordering
 
@@ -489,6 +495,13 @@ it means.
 - **A digest thought never wakes a voice** (`SILENT_KINDS`), but voices see digests in context.
 - **Cadence confirm clears the running flag** while waiting, so voices are not frozen while the
   person decides whether to record the result.
+- **Minimal engine text.** Listen and speak prompts say only that there is no conductor, what
+  to output, and (speak) to talk as one would out loud. Lists of reasons to speak or stay quiet
+  were brakes: voices fell silent after a round or two. Behaviour comes from the voice text.
+- **Every rendered thought carries its age** (`[12, 3 hours ago]`), so voices can tell an old
+  thread from the one in front of them without a rule saying so.
+- **Waker**: one random voice is woken after a quiet stretch, once per stretch (see *The voice
+  loop*). Off with `IDLE_WAKE_SECONDS=0`; evals and the simulator turn it off.
 
 ## Not built (deliberately)
 
@@ -625,6 +638,7 @@ EXA_API_KEY=  TAVILY_API_KEY=
 SENSE_MAX_ITEMS=3  SENSE_READ_MAX_ARTICLES=3
 NAMESPACE=polyphony
 DIGEST_IDLE_SECONDS=90       # quiet this long after a thought with nobody forming -> digest
+IDLE_WAKE_SECONDS=20         # quiet this long -> wake one random voice, once per stretch
 MCP_HTTP_HOST=127.0.0.1
 ```
 
@@ -637,19 +651,12 @@ Every prompt is ordered from most shared to least shared, for prompt caching:
 `frame text` → `engine text` (identical for every voice) → `voice text` (where relevant) →
 the rendered stream. Frame and engine text form a prefix shared by every voice in the
 ensemble; putting the voice text earlier would break that prefix at its first byte. Engine
-text keeps all v0 requirements, reworded neutrally:
+text is kept to the minimum (see *Decisions made while building v1*): no conductor, what to
+output, and for speak, talk as you would out loud with no name tag. The v0 lists of reasons
+to speak or stay quiet were removed.
 
-- You see: the stream, stray older thoughts, memories (related older thoughts), every voice's
-  latest listen, who is forming.
-- You are never obliged to speak or to agree with what "you" said before.
-- Reasons to speak; reasons not to (repetition, done, not interested, tired, irritated).
-- Original topics come only from the human or the world; long drift away from them, or
-  repetition, is a reason to stop.
-- Others forming is a reason to wait; everyone bored is a reason to let it go quiet.
-- You may propose a cadence.
-- Speak: no name tag, no "as I said", any length, may disagree with anyone including yourself.
-
-`render()` adds a memories block after strays (`[seq] author, 3 days ago: content`) and tags
+`render()` adds a memories block after strays, prints every thought with its age
+(`[seq, 3 days ago] author: content`), and tags
 the human's thoughts with the frame's `person_label`. Structured output: pass the JSON schema
 to providers that support it (OpenAI, Gemini, Ollama `format`); always keep extraction and
 normalisation as the fallback.

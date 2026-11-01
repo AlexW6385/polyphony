@@ -48,7 +48,7 @@ def isolated(settings: Settings, suffix: str, **overrides) -> Settings:
         "database_url": u.set(database=f"{u.database}_{suffix}").render_as_string(
             hide_password=False),
         "namespace": f"{settings.namespace}-{suffix}",
-        "run_senses": False, "run_digest": False,
+        "run_senses": False, "run_digest": False, "run_waker": False,
         **overrides,
     })
 

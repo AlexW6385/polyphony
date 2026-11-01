@@ -59,6 +59,17 @@ async def write_digest(stream: Stream, settings: Settings) -> dict[str, Any] | N
     return await stream.append("digest", "digest", body, meta=meta)
 
 
+async def quiet_for(stream: Stream) -> tuple[float, int] | None:
+    """(seconds since the last non-digest thought, its seq), or None if anything is busy."""
+    if await stream.forming() or await stream.cadence_running():
+        return None
+    recent = [t for t in await stream.recent() if t["kind"] != "digest"]
+    if not recent or not recent[-1].get("created_at"):
+        return None
+    last = datetime.fromisoformat(recent[-1]["created_at"])
+    return (datetime.now(timezone.utc) - last).total_seconds(), recent[-1]["seq"]
+
+
 async def digests(stream: Stream, limit: int = 20) -> list[dict[str, Any]]:
     async with stream.sessions() as s:
         rows = (await s.scalars(select(Thought).where(Thought.kind == "digest")
@@ -72,14 +83,7 @@ class Digester:
         self.settings = settings
 
     async def quiet_for(self) -> tuple[float, int] | None:
-        """(seconds since the last non-digest thought, its seq), or None if anything is busy."""
-        if await self.stream.forming() or await self.stream.cadence_running():
-            return None
-        recent = [t for t in await self.stream.recent() if t["kind"] != "digest"]
-        if not recent or not recent[-1].get("created_at"):
-            return None
-        last = datetime.fromisoformat(recent[-1]["created_at"])
-        return (datetime.now(timezone.utc) - last).total_seconds(), recent[-1]["seq"]
+        return await quiet_for(self.stream)
 
     async def run(self) -> None:
         while True:

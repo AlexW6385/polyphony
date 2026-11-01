@@ -118,6 +118,10 @@ class Voice:
     def name(self) -> str:
         return self.spec.name
 
+    def nudge(self) -> None:
+        """Look at the stream again even though it has not moved (the room went quiet)."""
+        self._wake.set()
+
     def _spawn(self, coro) -> None:
         t = asyncio.create_task(coro)
         self._background.add(t)

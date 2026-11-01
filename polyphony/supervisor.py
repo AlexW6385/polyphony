@@ -5,8 +5,8 @@ on the control channel. On a change it diffs the tables against what is
 running and starts, stops, or restarts (text changed) the affected tasks. A
 frame edit changes every voice's fingerprint, so all voices restart with it.
 
-It also runs the edge components that are not per-row: the memory embedder
-and the digester.
+It also runs the edge components that are not per-row: the memory embedder,
+the digester and the waker.
 This is what makes "add a voice from the UI" work without a restart, and it
 works across processes because the signal goes through Redis.
 """
@@ -27,6 +27,7 @@ from .frame import get_frame
 from .sense import Sense, SenseSpec
 from .stream import K_CONTROL, Stream
 from .voice import Voice, load_voice_specs
+from .waker import Waker
 
 log = logging.getLogger(__name__)
 
@@ -47,6 +48,7 @@ class Supervisor:
         self.run_senses = settings.run_senses if run_senses is None else run_senses
         self.memory = memory
         self.voices: dict[str, _Running] = {}
+        self.voice_objects: dict[str, Voice] = {}  # for the waker
         self.senses: dict[str, _Running] = {}
         self.edges: list[asyncio.Task] = []
         self._lock = asyncio.Lock()
@@ -65,10 +67,11 @@ class Supervisor:
             await self._diff(
                 self.voices,
                 {n: s.fingerprint() + ffp for n, s in specs.items()},
-                lambda n: Voice(specs[n], self.stream, self.settings, self._propose, frame,
-                                self.memory).run(),
+                lambda n: self._make_voice(specs[n], frame),
                 "voice",
             )
+            for name in set(self.voice_objects) - set(self.voices):
+                del self.voice_objects[name]
             if self.run_senses:
                 async with self.stream.sessions() as s:
                     rows = (await s.scalars(select(SenseRow).where(SenseRow.enabled))).all()
@@ -79,6 +82,11 @@ class Supervisor:
                     lambda n: Sense(sspecs[n], self.stream, self.settings).run(),
                     "sense",
                 )
+
+    def _make_voice(self, spec, frame):
+        voice = Voice(spec, self.stream, self.settings, self._propose, frame, self.memory)
+        self.voice_objects[spec.name] = voice
+        return voice.run()
 
     async def _diff(self, running: dict[str, _Running], wanted: dict[str, str], make, kind: str):
         for name in list(running):
@@ -101,6 +109,9 @@ class Supervisor:
         if self.settings.run_digest:
             self.edges.append(asyncio.create_task(Digester(self.stream, self.settings).run(),
                                                   name="digest"))
+        if self.settings.run_waker:
+            waker = Waker(self.stream, self.settings, lambda: dict(self.voice_objects))
+            self.edges.append(asyncio.create_task(waker.run(), name="waker"))
 
     async def run(self) -> None:
         self._start_edges()
@@ -131,4 +142,5 @@ class Supervisor:
             t.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
         self.voices.clear()
+        self.voice_objects.clear()
         self.senses.clear()

@@ -69,6 +69,9 @@ class Settings(BaseSettings):
     # Digest: quiet this long (no new thought, nobody forming) -> write a digest.
     digest_idle_seconds: float = 90.0
 
+    # Quiet this long -> wake one voice at random, once per quiet stretch. 0 = off.
+    idle_wake_seconds: float = 20.0
+
     # Senses over MCP.
     mcp_fetch_command: str = "uvx mcp-server-fetch"
     mcp_feeds_command: str = "python -m polyphony.mcp_servers.feeds"
@@ -97,6 +100,7 @@ class Settings(BaseSettings):
     run_senses: bool = True
     run_memory: bool = True
     run_digest: bool = True
+    run_waker: bool = True
 
     static_dir: Path = ROOT / "static"
 

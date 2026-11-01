@@ -57,7 +57,7 @@ def settings(tmp_path):
         speak_provider="fake", speak_model="fake-speak",
         ensembles_dir=tmp_path / "ensembles", namespace="ptest",
         embed_provider="", teacher_sample_rate=0.0,
-        run_senses=False, run_memory=False, run_digest=False,
+        run_senses=False, run_memory=False, run_digest=False, run_waker=False,
         _env_file=None,
     )
 

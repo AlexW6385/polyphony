@@ -119,7 +119,8 @@ def test_render_marks_self_and_kinds():
     out = prompts.render(recent, [], listens, ["make"], "rest", person_label="conscious")
     assert "[1] [conscious] conscious: hi" in out
     assert "[2] rest (you) (flat): tired" in out
-    assert 'rest (you): quiet — tired — "third loop"' in out
+    assert "rest (you): quiet — tired (at [2])" in out
+    assert "third loop" not in out
     assert "make" in out.split("## Forming a thought right now")[1]
 
 
@@ -160,3 +161,42 @@ def test_feeds_ssrf_guard_blocks_private_addresses():
                 "http://169.254.169.254/latest"):
         with pytest.raises(BlockedURL):
             asyncio.run(check_url(url))
+
+
+def test_render_shows_how_long_ago():
+    from datetime import datetime, timedelta, timezone
+
+    now = datetime.now(timezone.utc)
+    recent = [
+        {"seq": 1, "author": "doubt", "kind": "voice", "content": "old", "mood": None,
+         "created_at": (now - timedelta(days=3)).isoformat()},
+        {"seq": 2, "author": "doubt", "kind": "voice", "content": "new", "mood": None,
+         "created_at": (now - timedelta(seconds=30)).isoformat()},
+    ]
+    out = prompts.render(recent, [], {}, [], None)
+    assert "[1, 3 days ago] doubt: old" in out
+    assert "[2, 30 seconds ago] doubt: new" in out
+
+
+async def test_waker_wakes_one_voice_once_per_quiet_stretch(monkeypatch):
+    from types import SimpleNamespace
+
+    from polyphony import waker as waker_mod
+
+    quiet = {"q": (30.0, 5)}
+
+    async def fake_quiet_for(stream):
+        return quiet["q"]
+
+    monkeypatch.setattr(waker_mod, "quiet_for", fake_quiet_for)
+    nudged = []
+    voices = {n: SimpleNamespace(nudge=lambda n=n: nudged.append(n)) for n in ("a", "b")}
+    w = waker_mod.Waker(None, SimpleNamespace(idle_wake_seconds=20.0), lambda: voices)
+
+    assert await w.tick() in voices
+    assert await w.tick() is None  # same quiet stretch: no second wake
+    quiet["q"] = (5.0, 6)
+    assert await w.tick() is None  # not quiet long enough
+    quiet["q"] = (25.0, 6)
+    assert await w.tick() in voices
+    assert len(nudged) == 2

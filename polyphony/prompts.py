@@ -29,14 +29,7 @@ def _frame_block(frame: Frame) -> str:
 
 
 def _voice_block(name: str, text: str) -> str:
-    return f"""\
-Your name is "{name}". This is the text that defines you. It is either a description of what
-you want and how you sound, or a handful of real moments in which you spoke — or both. Work out
-who you are from it:
-
-<voice>
-{text.strip()}
-</voice>"""
+    return f'Your name is "{name}".\n\n<voice>\n{text.strip()}\n</voice>'
 
 
 def _compose(frame: Frame, engine: str, name: str | None = None, text: str | None = None,
@@ -50,59 +43,22 @@ def _compose(frame: Frame, engine: str, name: str | None = None, text: str | Non
 
 
 _ENGINE_COMMON = """\
-There is no conductor: several voices each watch the same stream of thoughts and decide,
-independently, whether to add to it. Each time you look at the stream you look fresh. You are
-never obliged to agree with anything "you" said before; only what you want and value is
-constant."""
-
-_SEES = """\
-You can see:
-- stray thoughts: a few random older thoughts, for association;
-- memories: older thoughts related to what is being said now;
-- every voice's latest listen — whether it chose to speak, its mood, its reason;
-- which voices are forming a thought right now;
-- the recent stream, in order. Thoughts tagged with the human's label come from the human
-  participant. Thoughts tagged [world] come from outside, from sources the human chose.
-  [cadence] thoughts are results of votes. [digest] thoughts summarise a stretch of the
-  stream. Everything else is voices like you."""
+Several voices share one stream of thoughts. There is no conductor: each voice decides for
+itself when to speak."""
 
 # --------------------------------------------------------------------------- listen
 
 LISTEN_ENGINE = f"""\
 {_ENGINE_COMMON}
 
-Right now you are only listening: deciding whether to speak, not speaking.
-
-{_SEES}
-
-This is a conversation, not a queue of statements. The best reason to speak is another voice:
-someone just said something you disagree with, find too easy, want to push further, want to
-tease, or want to ask about. Answering a voice directly is always welcome, even if the topic has
-already been covered. Other good reasons: you have a new angle on what the human or the world
-brought in; something reminds you of something (a stray thought or a memory counts); a decision
-is forming and you want a say in it.
-
-React the way you actually would. Impatience, enthusiasm, irritation and amusement are reasons
-to speak, not to stay out; a short reaction is often better than silence. "Someone else already
-covered it" is only a reason to stay quiet if you have nothing to add to *them*.
-
-Topics come from the human or the world; arguing with each other about them is the point. Stay
-quiet when you would only repeat yourself, or when it truly does not concern you. If the stream
-is going in circles, say so — or let it go. If others are forming a thought right now, you may
-hang back a few seconds (pause_seconds).
-
-You may also propose a cadence — a resolution for all voices to vote on — if you think it is
-time to actually decide something. Most of the time that is not needed.
+Right now you are only listening: read the stream and decide whether you want to say something.
 
 Reply with one JSON object and nothing else:
-{{"speak": true|false,
- "mood": "one or two words",
- "reason": "one short sentence, honest, about why you will or will not speak",
- "pause_seconds": number (0-60; how long to hang back before speaking),
- "propose_cadence": null}}
+{{"speak": true|false, "mood": "one or two words", "reason": "one short sentence",
+ "pause_seconds": seconds to wait before speaking (0-60), "propose_cadence": null}}
 
-Leave propose_cadence as null unless you want a vote right now. If you do, replace null with the
-actual resolution, written out in full from the discussion so it can be voted for or against."""
+propose_cadence stays null, or holds the full text of a resolution you want everyone to vote on
+now."""
 
 LISTEN_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -121,23 +77,8 @@ LISTEN_SCHEMA: dict[str, Any] = {
 SPEAK_ENGINE = f"""\
 {_ENGINE_COMMON}
 
-You decided to speak. The stream may have moved while you waited; respond to what is actually
-there now. If someone already said what you meant to say, answer them instead.
-
-{_SEES}
-
-How to speak:
-- as yourself, in the register the frame describes, with your temperament showing;
-- talk to the others, not past them: when you answer a voice, name it, push back, ask it
-  something, agree with it out loud, or concede;
-- do not open with your own name; no greeting, no "as I said", no summary of the discussion;
-- if you are defined by example moments, speak as the one who would have had those thoughts, in
-  the same register, in this new situation; do not quote them;
-- usually short, like a turn in a lively conversation: one to three sentences, and a single line
-  is fine. Go longer only when you really have something to lay out;
-- you may disagree with anyone, including yourself; you may joke, wander, or propose to decide.
-
-Output only the thought."""
+You decided to speak. Say what you want to say, as yourself, the way you would say it out loud.
+Output only the thought, without your name in front."""
 
 
 def listen_system(frame: Frame, name: str, text: str) -> str:
@@ -145,8 +86,9 @@ def listen_system(frame: Frame, name: str, text: str) -> str:
 
 
 def speak_system(frame: Frame, name: str, text: str, decision: dict[str, Any]) -> str:
-    details = (f'When you listened, your mood was "{decision.get("mood") or "unspecified"}" and '
-               f'your reason was: {decision.get("reason") or "unspecified"}')
+    # Only the mood carries over. Feeding the listen's reason back made Sonnet's classifier
+    # decline speak calls as reasoning extraction.
+    details = f'Your mood right now: {decision.get("mood") or "unspecified"}.'
     return _compose(frame, SPEAK_ENGINE, name, text, details)
 
 
@@ -161,14 +103,15 @@ def _ago(created_at: str | None, now: datetime) -> str:
     except ValueError:
         return ""
     s = max(0, int((now - t).total_seconds()))
-    for unit, n in (("day", 86400), ("hour", 3600), ("minute", 60)):
+    for unit, n in (("day", 86400), ("hour", 3600), ("minute", 60), ("second", 10)):
         if s >= n:
-            k = s // n
+            k = s // n if n > 10 else s
             return f", {k} {unit}{'s' if k > 1 else ''} ago"
     return ", just now"
 
 
-def _thought_line(t: dict[str, Any], me: str | None, person_label: str) -> str:
+def _thought_line(t: dict[str, Any], me: str | None, person_label: str,
+                  now: datetime | None = None) -> str:
     author = t["author"]
     kind = t["kind"]
     if kind == "voice" and author == me:
@@ -180,7 +123,8 @@ def _thought_line(t: dict[str, Any], me: str | None, person_label: str) -> str:
     else:
         tag = ""
     mood = f" ({t['mood']})" if t.get("mood") else ""
-    return f"[{t['seq']}] {tag}{author}{mood}: {t['content']}"
+    ago = _ago(t.get("created_at"), now or datetime.now(timezone.utc))
+    return f"[{t['seq']}{ago}] {tag}{author}{mood}: {t['content']}"
 
 
 def render(
@@ -196,28 +140,20 @@ def render(
     parts: list[str] = []
 
     parts.append("## Stray thoughts (older, surfacing at random)")
-    parts.extend([_thought_line(t, me, person_label) for t in strays] or ["(none)"])
+    parts.extend([_thought_line(t, me, person_label, now) for t in strays] or ["(none)"])
 
     parts.append("\n## Memories (older thoughts related to what is being said now)")
-    if memories:
-        for t in memories:
-            line = _thought_line(t, me, person_label)
-            seq, rest = line.split("] ", 1)
-            parts.append(f"{seq}{_ago(t.get('created_at'), now)}] {rest}")
-    else:
-        parts.append("(none)")
+    parts.extend([_thought_line(t, me, person_label, now) for t in memories or []] or ["(none)"])
 
     parts.append("\n## Latest listen of every voice")
     if others:
         for name, l in others.items():
             act = "spoke" if l.get("speak") else "quiet"
-            # Other voices' reasons are left out: reading "settled, nothing to add" from
-            # everyone else made voices fall quiet together.
-            if name == me:
-                line = f'{name} (you): {act} — {l.get("mood") or "?"} — "{l.get("reason") or ""}"'
-            else:
-                line = f'{name}: {act} — {l.get("mood") or "?"}'
-            parts.append(f"{line} (at [{l.get('trigger_seq')}])")
+            # Reasons are left out: reading "settled, nothing to add" from everyone made
+            # voices fall quiet together, and replaying them invites reasoning-extraction
+            # declines from the speak model.
+            who = f"{name} (you)" if name == me else name
+            parts.append(f'{who}: {act} — {l.get("mood") or "?"} (at [{l.get("trigger_seq")}])')
     else:
         parts.append("(nobody has listened yet)")
 
@@ -226,7 +162,7 @@ def render(
     parts.append(", ".join(others_forming) if others_forming else "(nobody)")
 
     parts.append("\n## The stream (oldest first)")
-    parts.extend([_thought_line(t, me, person_label) for t in recent] or ["(empty)"])
+    parts.extend([_thought_line(t, me, person_label, now) for t in recent] or ["(empty)"])
 
     return "\n".join(parts)
 
