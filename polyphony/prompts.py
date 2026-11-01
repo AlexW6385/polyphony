@@ -99,8 +99,9 @@ LISTEN_SCHEMA: dict[str, Any] = {
 SPEAK_ENGINE = f"""\
 {_ENGINE_COMMON}
 
-You decided to speak. Say what you want to say, as yourself, briefly, the way you would say it
-out loud in a meeting.
+You decided to speak. Say what you want to say, as yourself, the way you would say it out loud
+in a meeting: one short paragraph of two to four sentences, with your main point first. You are
+part of the person, so "I" is the person; never address them as "you".
 Output only the thought, without your name in front. The stream may have moved while you waited:
 if what you meant to say has been said, or the moment has passed, output nothing."""
 
