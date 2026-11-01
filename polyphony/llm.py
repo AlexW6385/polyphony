@@ -210,22 +210,47 @@ class OllamaProvider:
 # --------------------------------------------------------------------------- Anthropic
 
 
+ANTHROPIC_MIN_MAX_TOKENS = 16000  # room for default thinking before the visible reply
+# Models whose classifier declines can be retried server-side on Anthropic's recommended
+# substitute (`fallbacks: "default"`); Haiku 5.5 has no server-side fallback.
+ANTHROPIC_FALLBACK_MODELS = ("claude-sonnet-5-5", "claude-opus-5-5", "claude-opus-5",
+                             "claude-fable-5-1")
+
+
 class AnthropicProvider:
     def __init__(self, base_url: str | None, api_key: str | None):
         from anthropic import AsyncAnthropic
 
         self.client = AsyncAnthropic(base_url=base_url, api_key=api_key)
+        self.official = not base_url  # server-side fallbacks exist on the Claude API only
 
     async def complete(self, *, model, system, user, json=False, schema=None, temperature=0.8,
                        max_tokens=1024) -> Completion:
         # The system prompt is frame + engine (+ voice): mark it cacheable so the shared
         # prefix is billed once. Temperature is not sent; default sampling is fine.
-        resp = await self.client.messages.create(
+        # Current models think by default and thinking counts against max_tokens, so a
+        # 1024 cap could leave a JSON reply empty or cut off: give it headroom, and keep
+        # the short JSON judgements (listen, cadence rounds, triage) at low effort.
+        kwargs: dict[str, Any] = {}
+        if json:
+            kwargs["output_config"] = {"effort": "low"}
+        create = self.client.messages.create
+        if self.official and model in ANTHROPIC_FALLBACK_MODELS:
+            create = self.client.beta.messages.create
+            kwargs.update(betas=["server-side-fallback-2026-07-01"], fallbacks="default")
+        resp = await create(
             model=model,
             system=[{"type": "text", "text": system, "cache_control": {"type": "ephemeral"}}],
             messages=[{"role": "user", "content": user}],
-            max_tokens=max_tokens,
+            max_tokens=max(max_tokens, ANTHROPIC_MIN_MAX_TOKENS),
+            **kwargs,
         )
+        if resp.stop_reason == "refusal":
+            details = getattr(resp, "stop_details", None)
+            log.warning("anthropic %s declined (%s); treating as empty reply", model,
+                        getattr(details, "category", None))
+        elif resp.stop_reason == "max_tokens":
+            log.warning("anthropic %s hit max_tokens; reply may be cut off", model)
         u = resp.usage
         return Completion(
             text="".join(b.text for b in resp.content if getattr(b, "type", None) == "text"),
