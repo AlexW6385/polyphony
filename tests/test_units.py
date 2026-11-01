@@ -270,3 +270,34 @@ async def test_anthropic_web_search_keeps_only_the_reply_after_the_search():
     out = await p.complete(model="claude-sonnet-5-5", system="s", user="u", web_search=True)
     assert out.text == "the answer"
     assert sent["tools"] == [{"type": "web_search_20260209", "name": "web_search", "max_uses": 1}]
+
+
+async def test_mcp_ask_returns_the_outcome_once_the_digest_lands(monkeypatch):
+    import httpx
+
+    from polyphony.mcp_servers import mind
+
+    later = [
+        {"seq": 11, "kind": "voice", "author": "a", "content": "piano", "meta": {}},
+        {"seq": 12, "kind": "cadence", "author": "cadence", "content": "...",
+         "meta": {"question": "guitar or piano?", "options": ["guitar", "piano"],
+                  "result": {"shares": [0.36, 0.64], "winner": 1, "decided": True}}},
+        {"seq": 13, "kind": "digest", "author": "digest", "content": "...",
+         "meta": {"summary": {"decided": True, "outcome": "piano", "open": [],
+                              "positions": [{"voice": "a", "view": "piano"}]}}},
+    ]
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        if req.method == "POST":
+            assert json.loads(req.content)["kind"] == "conscious"
+            return httpx.Response(201, json={"seq": 10})
+        assert req.url.params["after"] == "10"
+        return httpx.Response(200, json=later)
+
+    monkeypatch.setattr(mind, "_client", lambda: httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url="http://t"))
+    out = await mind.ask("guitar or piano?")
+    assert out["finished"] and out["decided"] and out["outcome"] == "piano"
+    assert out["votes"] == [{"question": "guitar or piano?", "options": ["guitar", "piano"],
+                             "shares": [0.36, 0.64], "decided": True, "winner": "piano"}]
+    assert out["voice_thoughts"] == 1

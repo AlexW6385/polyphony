@@ -275,7 +275,7 @@ async def test_sense_reads_feeds_and_appends_world_thought_once(stream, settings
     async def script(system, user, json):
         if '"pick"' in system:
             assert "Regulator" in user and "<entry" in user
-            return _j(pick=[0], queries=["should be dropped"])
+            return _j(pick=[0])
         if '"items"' in system:
             assert "Full text of https://ex.com/a." in user and "<article" in user
             return _j(items=[{"title": "Regulator publishes rules", "url": "https://ex.com/a",
@@ -295,7 +295,6 @@ async def test_sense_reads_feeds_and_appends_world_thought_once(stream, settings
     ts = await stream.thoughts()
     assert [t["kind"] for t in ts] == ["world"]
     assert ts[0]["author"] == "ai-policy" and ts[0]["meta"]["url"] == "https://ex.com/a"
-    assert not any(c[0] == "search" for c in mcp.calls)  # search off: queries ignored
 
 
 async def test_digest_summarises_and_does_not_wake_voices(stream, mind, fake, settings):

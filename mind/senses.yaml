@@ -1,6 +1,6 @@
 # Senses: standing instructions plus the feeds the conscious part chose. Each runs once a
 # day at `daily_at` (local time, TIMEZONE), reads the feeds over MCP, picks what matters,
-# reads it, and drops new items into the score as `world` thoughts. Off by default:
+# reads it, and drops new items into the stream as `world` thoughts. Off by default:
 # enable one on the page, or run it once with "Run now". The DB is seeded from this file
 # on first start only.
 - name: world
@@ -10,7 +10,6 @@
   feeds:
     - https://feeds.bbci.co.uk/news/world/rss.xml
     - https://www.cbc.ca/webfeed/rss/rss-world
-  search: false
 - name: tech
   instruction: "Anything notable for someone starting a career in software: AI, hiring, tools."
   daily_at: "04:00"
@@ -18,4 +17,3 @@
   feeds:
     - https://www.cbc.ca/webfeed/rss/rss-technology
     - https://hnrss.org/frontpage?points=300
-  search: false

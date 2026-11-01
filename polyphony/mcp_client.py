@@ -34,21 +34,7 @@ def server_specs(settings: Settings) -> dict[str, ServerSpec]:
         "feeds": ServerSpec(settings.mcp_feeds_command),
         "fetch": ServerSpec(settings.mcp_fetch_command),
     }
-    if settings.exa_api_key:
-        specs["search"] = ServerSpec(settings.mcp_exa_command, {"EXA_API_KEY": settings.exa_api_key})
-    elif settings.tavily_api_key:
-        specs["search"] = ServerSpec(settings.mcp_tavily_command,
-                                     {"TAVILY_API_KEY": settings.tavily_api_key})
     return specs
-
-
-def search_tool(settings: Settings) -> tuple[str, str] | None:
-    """(tool name, query argument) of the configured search server."""
-    if settings.exa_api_key:
-        return settings.mcp_exa_tool, "query"
-    if settings.tavily_api_key:
-        return settings.mcp_tavily_tool, "query"
-    return None
 
 
 def result_text(result: Any) -> str:

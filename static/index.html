@@ -146,8 +146,6 @@
           <input id="sense-name" placeholder="name (e.g. coop-hiring)" class="mono">
           <textarea id="sense-instruction" rows="3" placeholder="What to look for in the world"></textarea>
           <textarea id="sense-feeds" rows="3" class="mono" placeholder="RSS/Atom feed URLs, one per line"></textarea>
-          <label class="small"><input type="checkbox" id="sense-search" style="width:auto">
-            allow web search (needs EXA_API_KEY or TAVILY_API_KEY)</label>
           <div class="row"><span class="small">daily at</span>
             <input id="sense-at" type="time" value="04:00" style="width:auto">
             <button class="primary">Add sense</button></div>
@@ -365,7 +363,7 @@ async function refreshSenses() {
     <div class="item ${s.enabled ? "" : "off"}" data-name="${esc(s.name)}">
       <span class="name">${esc(s.name)}</span> <span class="small">daily at
         <input type="time" value="${esc(s.daily_at)}" data-act="at" style="width:auto;padding:1px 4px">
-        ${esc(s.timezone)}${s.last_run ? " · last ran " + new Date(s.last_run).toLocaleString() : ""}${s.search ? " · search" : ""}</span>
+        ${esc(s.timezone)}${s.last_run ? " · last ran " + new Date(s.last_run).toLocaleString() : ""}</span>
       <div class="small">${esc(s.instruction)}</div>
       <div class="small mono">${(s.feeds || []).map(esc).join("<br>") || "no feeds"}</div>
       <div class="actions">
@@ -400,8 +398,7 @@ $("#sense-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   await api("POST", "/senses", {name: $("#sense-name").value.trim(),
     instruction: $("#sense-instruction").value, daily_at: $("#sense-at").value || "04:00",
-    feeds: $("#sense-feeds").value.split("\n").map(x => x.trim()).filter(Boolean),
-    search: $("#sense-search").checked});
+    feeds: $("#sense-feeds").value.split("\n").map(x => x.trim()).filter(Boolean)});
   e.target.reset(); refreshSenses();
 });
 

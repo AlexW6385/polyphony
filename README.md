@@ -111,25 +111,34 @@ Set the provider, key and the two models on the settings page, or in `.env`
   daily_at: "04:00"        # once a day, local time (TIMEZONE, default America/Toronto)
   enabled: false           # the shipped senses are off; enable on the page or press Run now
   feeds: [https://feeds.bbci.co.uk/news/world/rss.xml]
-  search: false            # true + EXA_API_KEY or TAVILY_API_KEY: background search
 ```
 
 A sense never runs because the room was resumed or restarted: only at its daily time, or once
 by hand with **Run now**.
 
-Each run is a small LangGraph workflow (collect, triage, [search], read, summarise, emit) over
-MCP: our `polyphony-feeds` server (RSS/Atom, SSRF-guarded), the official `mcp-server-fetch` for
-article text, optionally Exa or Tavily.
+Each run is a small LangGraph workflow (collect, triage, read, summarise, emit) over MCP: our
+`polyphony-feeds` server (RSS/Atom, SSRF-guarded) and the official `mcp-server-fetch` for
+article text. There is no search step: voices search the web themselves when they speak.
 
 ## Polyphony as an MCP server
 
+Other AI apps (Claude Code, Claude Desktop) can bring a question to your voices.
+
 ```bash
-python -m polyphony.mcp_servers.mind           # stdio
-python -m polyphony.mcp_servers.mind --http    # streamable HTTP on 127.0.0.1:8001
+claude mcp add polyphony -- docker compose -f /path/to/polyphony/docker-compose.yml \
+  exec -T mind python -m polyphony.mcp_servers.mind
 ```
 
-Tools: `say`, `read_stream`, `list_voices` (over the HTTP API at `API_URL`).
-Claude Code: `claude mcp add polyphony -- python -m polyphony.mcp_servers.mind`.
+| Tool | What it does |
+|---|---|
+| `ask` | brings a question in as conscious and waits (a few minutes) for the outcome: decided or not, the result, each voice's position, what is open, the votes |
+| `say` | drops a thought in without waiting |
+| `read_stream` | the thoughts after a given `seq` |
+| `list_voices` | the voices, whether each is forming a thought, its last listen |
+
+Then, in Claude Code: "ask polyphony whether I should send out my resume tomorrow morning or go
+play badminton". `python -m polyphony.mcp_servers.mind --http` serves streamable HTTP on
+127.0.0.1:8001 instead of stdio.
 
 **No auth.** The HTTP API (via Compose) and the MCP HTTP transport listen on `127.0.0.1` only.
 Publishing either elsewhere lets anyone who can reach it drop thoughts in.

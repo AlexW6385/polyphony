@@ -83,6 +83,13 @@ most once per thought (about 2¢ per search). Listening, votes, the clerk and th
 offline. `SPEAK_WEB_SEARCH=false` turns it off; some organisations must first allow web search in
 the Claude Console. Text the model wrote before its search is dropped, so only the reply lands.
 
+**No sense search; `ask` over MCP.** Senses no longer have an optional Exa/Tavily search step:
+voices search the web themselves when they speak, and the search servers needed Node in the
+image. A sense is now feeds, triage, read, summarise, emit. As an MCP server, Polyphony adds
+`ask`: it drops a question in as conscious, waits for the digest (written after the voices fall
+quiet), and returns whether it was decided, the outcome, the positions, what is open and the
+votes, so another AI app gets an answer in one call instead of polling the stream.
+
 **Live vote, plain listening.** While a cadence runs, the page shows a dashed "voting" card at
 the end of the stream (question, options, which round), polled from `GET /cadences/running`; it
 is not a thought, so voices never read it, and it gives way to the result card when that lands.
@@ -307,8 +314,8 @@ voice text.
  MCP clients (Claude, ...) ─▶ mind MCP server ─┤
  senses (LangGraph run) ─────────────┤
    ├─ feeds MCP (ours)                │
-   ├─ Fetch MCP (official)            ▼
-   └─ search MCP (Exa/Tavily, opt.) ┌──────────┐  append   ┌──────────────┐
+   └─ Fetch MCP (official)            ▼
+                                    ┌──────────┐  append   ┌──────────────┐
                                     │          │ ────────▶ │ PostgreSQL   │ thoughts (seq = order of record)
    voice A ──┐                      │  Stream  │           │  + pgvector  │ listens · samples · embeddings
    voice B ──┼──────────────────▶   │          │ ────────▶ │ Redis        │ recent window · forming · pub/sub
@@ -525,7 +532,6 @@ replacing the off-the-shelf local model by changing one setting.
 |---|---|---|
 | `polyphony-feeds` | this repo | fetch RSS/Atom feeds; stateless, no keys, SSRF-guarded |
 | `mcp-server-fetch` | official reference server | full article text as markdown |
-| Exa or Tavily | the vendor | optional web search, only with an API key |
 
 Community MCP servers are not used: a server runs with whatever access it is given, so only
 our own code, official reference servers and vendor-maintained servers are allowed.
@@ -772,7 +778,6 @@ TEACHER_PROVIDER=  TEACHER_MODEL=  TEACHER_SAMPLE_RATE=0.05          # empty = s
 EMBED_PROVIDER=ollama  EMBED_MODEL=nomic-embed-text  EMBED_DIM=768  MEMORY_K=5
 MCP_FETCH_COMMAND="uvx mcp-server-fetch"
 MCP_FEEDS_COMMAND="python -m polyphony.mcp_servers.feeds"
-EXA_API_KEY=  TAVILY_API_KEY=
 SENSE_MAX_ITEMS=3  SENSE_READ_MAX_ARTICLES=3
 NAMESPACE=polyphony
 DIGEST_IDLE_SECONDS=90       # quiet this long after a thought with nobody forming -> digest

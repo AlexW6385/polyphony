@@ -7,7 +7,7 @@ or by title) are never appended twice. Works with any provider: nothing here
 depends on a vendor's built-in web search.
 
 A fixed daily time (default 04:00) instead of an interval means a sense never runs just
-because the room was resumed or restarted, and never cuts into a discussion at a random
+because everything was resumed or restarted, and never cuts into a discussion at a random
 moment. It can also be run once by hand (`POST /senses/{name}/run`).
 """
 
@@ -60,15 +60,14 @@ class SenseSpec:
     instruction: str
     daily_at: str = DEFAULT_DAILY_AT
     feeds: tuple[str, ...] = ()
-    search: bool = False
 
     @classmethod
     def from_row(cls, row: SenseRow) -> SenseSpec:
         return cls(row.name, row.instruction, row.daily_at or DEFAULT_DAILY_AT,
-                   tuple(row.feeds or ()), bool(row.search))
+                   tuple(row.feeds or ()))
 
     def fingerprint(self) -> str:
-        blob = json.dumps([self.instruction, self.daily_at, list(self.feeds), self.search])
+        blob = json.dumps([self.instruction, self.daily_at, list(self.feeds)])
         return hashlib.sha256(blob.encode()).hexdigest()
 
 
@@ -120,7 +119,7 @@ class Sense:
         """
         from . import sense_graph
         from .frame import get_frame
-        from .mcp_client import MCPClient, search_tool
+        from .mcp_client import MCPClient
 
         frame = await get_frame(self.stream.sessions)
         if not self.spec.feeds:
@@ -129,9 +128,7 @@ class Sense:
             return []
 
         async def go(client):
-            graph = sense_graph.build(sense=self, settings=self.settings, frame=frame, mcp=client,
-                                      search=search_tool(self.settings) if client.has("search")
-                                      else None)
+            graph = sense_graph.build(sense=self, settings=self.settings, frame=frame, mcp=client)
             return await graph.ainvoke({})
 
         if mcp is None:

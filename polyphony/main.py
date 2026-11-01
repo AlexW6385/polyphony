@@ -56,8 +56,7 @@ async def seed(stream: Stream, settings: Settings) -> None:
                     s.add(SenseRow(name=entry["name"], instruction=entry["instruction"],
                                    daily_at=check_daily_at(entry.get("daily_at", DEFAULT_DAILY_AT)),
                                    enabled=bool(entry.get("enabled", True)),
-                                   feeds=list(entry.get("feeds") or []),
-                                   search=bool(entry.get("search", False))))
+                                   feeds=list(entry.get("feeds") or [])))
                     n += 1
             log.info("seeded %d sense(s) from %s", n, settings.senses_file)
         await s.commit()

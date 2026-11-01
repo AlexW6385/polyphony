@@ -55,14 +55,12 @@ class SenseIn(BaseModel):
     instruction: str = Field(min_length=1)
     daily_at: str = DEFAULT_DAILY_AT
     feeds: list[str] = Field(default_factory=list)
-    search: bool = False
 
 
 class SensePatch(BaseModel):
     instruction: str | None = None
     daily_at: str | None = None
     feeds: list[str] | None = None
-    search: bool | None = None
     enabled: bool | None = None
 
 
@@ -405,7 +403,7 @@ def create_app(stream: Stream, settings: Settings, lifespan=None) -> FastAPI:
                 raise HTTPException(409, "a sense with that name exists")
             row = SenseRow(name=x.name, instruction=x.instruction.strip(),
                            daily_at=_daily_at(x.daily_at),
-                           feeds=_check_feeds(x.feeds), search=x.search, enabled=True)
+                           feeds=_check_feeds(x.feeds), enabled=True)
             s.add(row)
             await s.commit()
             out = row.to_dict()
@@ -424,8 +422,6 @@ def create_app(stream: Stream, settings: Settings, lifespan=None) -> FastAPI:
                 row.daily_at = _daily_at(x.daily_at)
             if x.feeds is not None:
                 row.feeds = _check_feeds(x.feeds)
-            if x.search is not None:
-                row.search = x.search
             if x.enabled is not None:
                 row.enabled = x.enabled
             await s.commit()

@@ -58,12 +58,6 @@ class Settings(BaseSettings):
     # Senses over MCP.
     mcp_fetch_command: str = "uvx mcp-server-fetch"
     mcp_feeds_command: str = "python -m polyphony.mcp_servers.feeds"
-    exa_api_key: str = ""
-    tavily_api_key: str = ""
-    mcp_exa_command: str = "npx -y exa-mcp-server"
-    mcp_exa_tool: str = "web_search_exa"
-    mcp_tavily_command: str = "npx -y tavily-mcp"
-    mcp_tavily_tool: str = "tavily-search"
     sense_max_items: int = 3
     sense_read_max_articles: int = 3
 

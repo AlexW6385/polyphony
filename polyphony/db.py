@@ -132,7 +132,6 @@ class SenseRow(Base):
     instruction: Mapped[str] = mapped_column(Text)
     daily_at: Mapped[str] = mapped_column(String(5), default="04:00", server_default="04:00")
     feeds: Mapped[list[str]] = mapped_column(JSONB, default=list, server_default="[]")
-    search: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     last_run: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -142,7 +141,6 @@ class SenseRow(Base):
             "instruction": self.instruction,
             "daily_at": self.daily_at,
             "feeds": list(self.feeds or []),
-            "search": bool(self.search),
             "enabled": self.enabled,
             "last_run": self.last_run.isoformat() if self.last_run else None,
         }
