@@ -28,9 +28,10 @@ settings = get_settings()
 mcp = FastMCP(
     "polyphony",
     instructions=("The inner voices of one person, sharing one stream of thoughts. `ask` brings a "
-                  "question in as the person's conscious part and waits for the outcome: the "
-                  "vote and the digest written once the voices fall quiet (a few minutes). `say` "
-                  "only drops a thought in; read the stream again after a while."),
+                  "question in as the person's conscious part and returns at once; then call "
+                  "`outcome` with its asked_seq, again and again, until finished is true (the "
+                  "voices take a few minutes; each call waits up to about 50 s). `say` only drops "
+                  "a thought in."),
     host=settings.mcp_http_host,
     port=settings.mcp_http_port,
 )
@@ -40,26 +41,40 @@ def _client() -> httpx.AsyncClient:
     return httpx.AsyncClient(base_url=settings.api_url, timeout=30)
 
 
-@mcp.tool()
-async def ask(question: str, wait_seconds: int = 420) -> dict[str, Any]:
-    """Bring a question in as conscious and wait for the voices' outcome.
+OUTCOME_WAIT = 50  # seconds one `outcome` call waits at most: under any client's timeout
 
-    Returns once the digest of the discussion is written (after the voices fall quiet), with
-    whether it was decided, the outcome, each voice's position, what is still open, and the
-    votes. If `wait_seconds` runs out first, returns what is there so far.
+
+@mcp.tool()
+async def ask(question: str) -> dict[str, Any]:
+    """Bring a question in as conscious. Returns at once with its `asked_seq`.
+
+    The voices then discuss it on their own, usually for a few minutes. Call
+    `outcome(asked_seq)` until it says `finished`.
     """
     async with _client() as c:
         r = await c.post("/thoughts", json={"content": question, "kind": "conscious"})
         r.raise_for_status()
         asked = r.json()["seq"]
-        deadline = time.monotonic() + max(30, min(wait_seconds, 1800))
-        thoughts: list[dict[str, Any]] = []
+    return {"asked_seq": asked,
+            "next": f"call outcome({asked}) until finished is true; the voices take a few minutes"}
+
+
+@mcp.tool()
+async def outcome(asked_seq: int) -> dict[str, Any]:
+    """What the voices made of the question at `asked_seq`, waiting at most about 50 seconds.
+
+    `finished` is true once the digest of the discussion is written (after the voices fall
+    quiet): then it has whether it was decided, the outcome, each voice's position and what is
+    still open. Until then it reports progress (thoughts so far, votes). Always has the votes.
+    """
+    deadline = time.monotonic() + OUTCOME_WAIT
+    async with _client() as c:
         while True:
-            r = await c.get("/thoughts", params={"after": asked, "limit": 1000})
+            r = await c.get("/thoughts", params={"after": asked_seq, "limit": 1000})
             r.raise_for_status()
             thoughts = r.json()
             digest = next((t for t in thoughts if t["kind"] == "digest"), None)
-            if digest or time.monotonic() >= deadline:
+            if digest or time.monotonic() + 5 >= deadline:
                 break
             await asyncio.sleep(5)
     votes = []
@@ -71,7 +86,7 @@ async def ask(question: str, wait_seconds: int = 420) -> dict[str, Any]:
                           "shares": res.get("shares"), "decided": res.get("decided"),
                           "winner": (m["options"][res["winner"]]
                                      if res.get("winner") is not None else None)})
-    out: dict[str, Any] = {"asked_seq": asked, "finished": digest is not None,
+    out: dict[str, Any] = {"asked_seq": asked_seq, "finished": digest is not None,
                            "voice_thoughts": sum(t["kind"] == "voice" for t in thoughts),
                            "votes": votes}
     summary = (digest.get("meta") or {}).get("summary") if digest else None
@@ -79,6 +94,8 @@ async def ask(question: str, wait_seconds: int = 420) -> dict[str, Any]:
         out.update({k: summary.get(k) for k in ("decided", "outcome", "positions", "open")})
     elif digest:
         out["outcome"] = digest["content"]
+    else:
+        out["next"] = f"still discussing; call outcome({asked_seq}) again"
     return out
 
 

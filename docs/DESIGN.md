@@ -104,9 +104,11 @@ the Claude Console. Text the model wrote before its search is dropped, so only t
 **No sense search; `ask` over MCP.** Senses no longer have an optional Exa/Tavily search step:
 voices search the web themselves when they speak, and the search servers needed Node in the
 image. A sense is now feeds, triage, read, summarise, emit. As an MCP server, Polyphony adds
-`ask`: it drops a question in as conscious, waits for the digest (written after the voices fall
-quiet), and returns whether it was decided, the outcome, the positions, what is open and the
-votes, so another AI app gets an answer in one call instead of polling the stream.
+`ask` and `outcome`: `ask` drops a question in as conscious and returns at once; `outcome` waits
+up to about 50 s per call and, once the digest is written (after the voices fall quiet), returns
+whether it was decided, the outcome, the positions, what is open and the votes. A single call
+that waited the few minutes a discussion takes ran past MCP clients' tool timeouts; short calls
+the client repeats never do.
 
 **Live vote, plain listening.** While a cadence runs, the page shows a dashed "voting" card at
 the end of the stream (question, options, which round), polled from `GET /cadences/running`; it

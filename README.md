@@ -165,7 +165,8 @@ claude mcp add polyphony -- docker compose -f /path/to/polyphony/docker-compose.
 
 | Tool | What it does |
 |---|---|
-| `ask` | brings a question in as conscious and waits (a few minutes) for the outcome: decided or not, the result, each voice's position, what is open, the votes |
+| `ask` | brings a question in as conscious and returns at once with its `asked_seq` |
+| `outcome` | waits up to ~50 s per call; once the voices are done (a few minutes), decided or not, the result, each voice's position, what is open, the votes; until then, progress |
 | `say` | drops a thought in without waiting |
 | `read_stream` | the thoughts after a given `seq` |
 | `list_voices` | the voices, whether each is forming a thought, its last listen |

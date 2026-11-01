@@ -278,7 +278,7 @@ async def test_anthropic_web_search_keeps_only_the_reply_after_the_search():
     assert sent["tools"] == [{"type": "web_search_20260209", "name": "web_search", "max_uses": 1}]
 
 
-async def test_mcp_ask_returns_the_outcome_once_the_digest_lands(monkeypatch):
+async def test_mcp_ask_returns_at_once_and_outcome_once_the_digest_lands(monkeypatch):
     import httpx
 
     from polyphony.mcp_servers import mind
@@ -302,8 +302,26 @@ async def test_mcp_ask_returns_the_outcome_once_the_digest_lands(monkeypatch):
 
     monkeypatch.setattr(mind, "_client", lambda: httpx.AsyncClient(
         transport=httpx.MockTransport(handler), base_url="http://t"))
-    out = await mind.ask("guitar or piano?")
+    asked = await mind.ask("guitar or piano?")
+    assert asked["asked_seq"] == 10
+    out = await mind.outcome(asked["asked_seq"])
     assert out["finished"] and out["decided"] and out["outcome"] == "piano"
     assert out["votes"] == [{"question": "guitar or piano?", "options": ["guitar", "piano"],
                              "shares": [0.36, 0.64], "decided": True, "winner": "piano"}]
     assert out["voice_thoughts"] == 1
+
+
+async def test_mcp_outcome_reports_progress_until_the_discussion_is_done(monkeypatch):
+    import httpx
+
+    from polyphony.mcp_servers import mind
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=[{"seq": 11, "kind": "voice", "author": "a",
+                                          "content": "piano", "meta": {}}])
+
+    monkeypatch.setattr(mind, "OUTCOME_WAIT", 0)
+    monkeypatch.setattr(mind, "_client", lambda: httpx.AsyncClient(
+        transport=httpx.MockTransport(handler), base_url="http://t"))
+    out = await mind.outcome(10)
+    assert not out["finished"] and out["voice_thoughts"] == 1 and "outcome(10)" in out["next"]
