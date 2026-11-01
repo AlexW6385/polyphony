@@ -243,6 +243,12 @@ async def test_anthropic_request_is_cached_and_has_room_to_think():
     assert sent["system"][0]["cache_control"] == {"type": "ephemeral"}
     assert any("cache_control" in b for b in sent["messages"][0]["content"])
     assert "fallbacks" not in sent  # Haiku has no server-side fallback
+    assert "format" not in sent["output_config"]  # no schema given
+    await p.complete(model="claude-haiku-5-5", system="sys", user=user, json=True,
+                     schema=prompts.DIGEST_SCHEMA)
+    fmt = sent["output_config"]["format"]
+    assert fmt["type"] == "json_schema" and fmt["schema"]["additionalProperties"] is False
+    assert fmt["schema"]["properties"]["positions"]["items"]["additionalProperties"] is False
     await p.complete(model="claude-sonnet-5-5", system="sys", user=user)
     assert sent["fallbacks"] == "default"
     assert "tools" not in sent  # no search unless asked for

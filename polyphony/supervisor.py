@@ -6,7 +6,7 @@ running and starts, stops, or restarts (text changed) the affected tasks. A
 frame edit changes every voice's fingerprint, so all voices restart with it.
 
 It also runs the edge components that are not per-row: the digester and the
-clerk (which calls votes). While the room is paused (`Stream.set_paused`) it
+clerk (which calls votes). While everything is paused (`Stream.set_paused`) it
 runs nothing at all: every voice, sense and edge component is stopped until
 it is resumed.
 This is what makes "add a voice from the UI" work without a restart, and it

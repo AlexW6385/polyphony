@@ -113,7 +113,7 @@ Set the provider, key and the two models on the settings page, or in `.env`
   feeds: [https://feeds.bbci.co.uk/news/world/rss.xml]
 ```
 
-A sense never runs because the room was resumed or restarted: only at its daily time, or once
+A sense never runs because everything was resumed or restarted: only at its daily time, or once
 by hand with **Run now**.
 
 Each run is a small LangGraph workflow (collect, triage, read, summarise, emit) over MCP: our

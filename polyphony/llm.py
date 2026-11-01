@@ -8,7 +8,7 @@ Every call is traced: `set_tracer()` installs a callback that receives one
 `Trace` per call (main.py writes them to `llm_calls`).
 
 Structured output: `complete_json(schema=...)` passes the JSON schema to
-vendors that enforce it (OpenAI, Gemini); the reply is
+vendors that enforce it (Anthropic, OpenAI, Gemini); the reply is
 always run through `extract_json` as well, so a vendor without enforcement
 still works.
 """
@@ -178,6 +178,18 @@ ANTHROPIC_FALLBACK_MODELS = ("claude-sonnet-5-5", "claude-opus-5-5", "claude-opu
                              "claude-fable-5-1")
 
 
+def _closed(schema: Any) -> Any:
+    """The schema with `additionalProperties: false` on every object, as Anthropic requires."""
+    if isinstance(schema, dict):
+        out = {k: _closed(v) for k, v in schema.items()}
+        if out.get("type") == "object":
+            out.setdefault("additionalProperties", False)
+        return out
+    if isinstance(schema, list):
+        return [_closed(v) for v in schema]
+    return schema
+
+
 class AnthropicProvider:
     def __init__(self, base_url: str | None, api_key: str | None):
         from anthropic import AsyncAnthropic
@@ -195,6 +207,9 @@ class AnthropicProvider:
         kwargs: dict[str, Any] = {}
         if json:
             kwargs["output_config"] = {"effort": "low"}
+            if schema:  # the reply is then guaranteed to be valid JSON for the schema
+                kwargs["output_config"]["format"] = {"type": "json_schema",
+                                                     "schema": _closed(schema)}
         create = self.client.messages.create
         if self.official and model in ANTHROPIC_FALLBACK_MODELS:
             create = self.client.beta.messages.create

@@ -23,7 +23,7 @@ from .db import AppSetting, Listen, Thought
 log = logging.getLogger(__name__)
 
 # Every key is `<namespace>:<suffix>`; the namespace isolates evals and the
-# simulator from a live room sharing the same Redis.
+# simulator from a live stream sharing the same Redis.
 K_THOUGHTS = "thoughts"  # pub/sub; payload = thought JSON
 K_RECENT = "recent"  # sorted set of thought JSON scored by seq, trimmed to the window
 K_FORMING = "forming"  # set of voice names currently composing
@@ -209,7 +209,7 @@ class Stream:
         """Stop or restart every voice, sense and background component, in any process.
 
         The flag lives in PostgreSQL, not Redis: Redis has no volume, so `docker compose
-        down` would forget it and the room would start running on the next `up`.
+        down` would forget it and everything would start running on the next `up`.
         """
         async with self.sessions() as s:
             row = await s.get(AppSetting, PAUSED_ROW)

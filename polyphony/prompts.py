@@ -82,7 +82,8 @@ have something only you would say.
 
 Reply with one JSON object and nothing else:
 {{"speak": true|false, "mood": "one or two words", "reason": "one short sentence",
- "pause_seconds": seconds to wait before speaking (0-60)}}"""
+ "pause_seconds": seconds to wait before speaking (0-60)}}
+Write mood and reason in the language of the stream."""
 
 LISTEN_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -255,7 +256,7 @@ Second round: vote. Say which options you support, by letter: one, several, or n
 one-line reason in your own voice.
 
 Reply with one JSON object and nothing else:
-{{"support": ["A", ...], "reason": "one line"}}"""
+{{"support": ["A", ...], "reason": "one line, in the language of the stream"}}"""
     return _compose(frame, CADENCE_ENGINE, details)
 
 

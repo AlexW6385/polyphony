@@ -1,6 +1,6 @@
 """Digest: a readable outcome of a stretch of the stream.
 
-An edge component like a sense, never a voice. When the room has been quiet
+An edge component like a sense, never a voice. When the stream has been quiet
 for `DIGEST_IDLE_SECONDS` (no new thought, nobody forming, no cadence running)
 and something was said since the last digest, it writes a summary of that
 stretch — the question, each voice's position, what changed, the outcome —

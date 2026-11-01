@@ -1,4 +1,4 @@
-"""HTTP API: feed the room, read the record, watch it live, manage voices and senses."""
+"""HTTP API: feed the stream, read the record, watch it live, manage voices and senses."""
 
 from __future__ import annotations
 

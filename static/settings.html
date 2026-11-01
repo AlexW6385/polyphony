@@ -94,7 +94,7 @@
 <body>
 <header>
   <h1>Settings</h1>
-  <a href="/">← back to the room</a>
+  <a href="/">← back to the stream</a>
   <div class="right"><span id="run-state" class="muted"></span><button id="pause">Stop all</button></div>
 </header>
 <main>
@@ -108,11 +108,11 @@
         <div class="hint" id="key-state"></div></div>
       <label for="listen-model">Listen model</label>
       <div class="field"><input id="listen-model" list="models" class="mono">
-        <div class="hint">Decides whether a voice speaks. Runs on every new thought, once per voice, so keep it cheap and fast.</div>
+        <div class="hint">Decides whether a voice speaks, and casts the votes. Runs on every new thought, once per voice, so keep it cheap and fast.</div>
         <div class="result" id="listen-result"></div></div>
       <label for="speak-model">Speak model</label>
       <div class="field"><input id="speak-model" list="models" class="mono">
-        <div class="hint">Writes what a voice says, the votes and the digest.</div>
+        <div class="hint">Writes what a voice says (with web search), the clerk's calls and the digest.</div>
         <div class="result" id="speak-result"></div></div>
     </div>
     <datalist id="models"></datalist>

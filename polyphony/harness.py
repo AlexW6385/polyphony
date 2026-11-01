@@ -2,7 +2,7 @@
 
 Shared by the evals and the self-play simulator. Each run gets its own
 database (created if missing) and its own Redis namespace, so it never sees or
-disturbs a live room on the same servers.
+disturbs a live stream on the same servers.
 """
 
 from __future__ import annotations
