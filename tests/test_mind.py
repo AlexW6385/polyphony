@@ -204,6 +204,32 @@ async def test_clerk_calls_a_vote_when_due(stream, settings, fake):
     assert (await stream.thoughts())[-1]["kind"] == "voice"  # no vote this time
 
 
+async def test_clerk_declining_mid_discussion_still_checks_once_quiet(stream, settings, fake):
+    from polyphony import clerk as clerk_mod
+
+    seen = []
+
+    async def script(system, user, json):
+        seen.append("still going" if "still going" in system else "over")
+        return _j(call_vote=False, question="", options=[])
+
+    fake.script = script
+    clerk = clerk_mod.Clerk(stream, settings)
+    await stream.append("conscious", "conscious", "which one?")
+    assert not await clerk.tick()
+    for i in range(clerk_mod.CHECK_EVERY):
+        await stream.append("ride", "voice", f"point {i}")
+    assert await clerk.tick() and seen == ["still going"]  # declined mid-discussion
+    monkey = clerk_mod.QUIET_SECONDS
+    clerk_mod.QUIET_SECONDS = 0
+    try:
+        assert await clerk.tick()  # nothing new, but the quiet check has not run yet
+        assert not await clerk.tick()  # and it runs only once
+    finally:
+        clerk_mod.QUIET_SECONDS = monkey
+    assert seen == ["still going", "over"]
+
+
 async def test_clerk_waits_while_a_vote_is_under_way(stream, settings, fake):
     from polyphony import clerk as clerk_mod
 

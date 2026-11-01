@@ -234,7 +234,11 @@ def create_app(stream: Stream, settings: Settings, lifespan=None) -> FastAPI:
     async def running_cadences():
         """Votes under way, for the page's "voting" card (not part of the stream)."""
         async with stream.sessions() as s:
-            rows = (await s.scalars(select(Cadence).where(Cadence.status == "running")
+            # A vote that died with an error stays "running" until the next start resumes
+            # it; past the running flag's TTL it is not shown as under way.
+            since = datetime.now(timezone.utc) - timedelta(minutes=15)
+            rows = (await s.scalars(select(Cadence).where(Cadence.status == "running",
+                                                          Cadence.created_at > since)
                                     .order_by(Cadence.id))).all()
         return [{"id": r.id, "question": r.resolution, "options": r.options,
                  "round": 1 if r.weights is None else 2,

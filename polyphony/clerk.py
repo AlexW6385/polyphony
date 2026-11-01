@@ -39,7 +39,10 @@ class Clerk:
     def __init__(self, stream: Stream, settings: Settings):
         self.stream = stream
         self.settings = settings
-        self._checked_seq: int | None = None  # last thought already looked at
+        # Last thought each kind of check has covered. Kept apart so a mid-discussion check
+        # that declines does not use up the check once the stream falls quiet.
+        self._counted_seq: int | None = None
+        self._quiet_seq: int | None = None
 
     async def tick(self) -> bool:
         """Check the discussion if it is due. Returns True if a check ran."""
@@ -49,20 +52,21 @@ class Clerk:
         if not talk:
             return False
         last = talk[-1]["seq"]
-        if self._checked_seq is None:  # just started: don't revisit what came before
-            self._checked_seq = last
+        if self._counted_seq is None:  # just started: don't revisit what came before
+            self._counted_seq = self._quiet_seq = last
             return False
-        new = [t for t in talk if t["seq"] > self._checked_seq]
-        if not new:
-            return False
-        when = "count" if len(new) >= CHECK_EVERY else None
-        if when is None and any(t["kind"] == "voice" for t in new):
+        if len([t for t in talk if t["seq"] > self._counted_seq]) >= CHECK_EVERY:
+            when = "count"
+        elif any(t["kind"] == "voice" and t["seq"] > self._quiet_seq for t in talk):
             q = await quiet_for(self.stream)
-            if q is not None and q[0] >= QUIET_SECONDS:
-                when = "quiet"
-        if when is None:
+            if q is None or q[0] < QUIET_SECONDS:
+                return False
+            when = "quiet"
+        else:
             return False
-        self._checked_seq = last
+        self._counted_seq = last
+        if when == "quiet":
+            self._quiet_seq = last
         await self.check(when)
         return True
 
