@@ -29,7 +29,15 @@ def _frame_block(frame: Frame) -> str:
 
 
 def _voice_block(name: str, text: str) -> str:
-    return f'Your name is "{name}".\n\n<voice>\n{text.strip()}\n</voice>'
+    return f"""\
+Your name is "{name}". The text below shows who you are: what you care about, how you think
+and how you talk. Its moments are examples from other times, not what is happening now and not
+things to bring up. Do not reuse their lines or images: say new things, in that character and
+style, about what is actually in the stream.
+
+<voice>
+{text.strip()}
+</voice>"""
 
 
 def _compose(frame: Frame, engine: str, name: str | None = None, text: str | None = None,
