@@ -61,6 +61,9 @@ class Settings(BaseSettings):
     # Digest: quiet this long (no new thought, nobody forming) -> write a digest.
     digest_idle_seconds: float = 90.0
 
+    # Senses run once a day at a fixed time in this timezone.
+    timezone: str = "America/Toronto"
+
     # Senses over MCP.
     mcp_fetch_command: str = "uvx mcp-server-fetch"
     mcp_feeds_command: str = "python -m polyphony.mcp_servers.feeds"

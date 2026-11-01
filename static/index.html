@@ -144,9 +144,9 @@
           <textarea id="sense-feeds" rows="3" class="mono" placeholder="RSS/Atom feed URLs, one per line"></textarea>
           <label class="small"><input type="checkbox" id="sense-search" style="width:auto">
             allow web search (needs EXA_API_KEY or TAVILY_API_KEY)</label>
-          <div class="row"><span class="small">every</span>
-            <input id="sense-every" type="number" min="30" value="240" style="width:90px">
-            <span class="small">min</span><button class="primary">Add sense</button></div>
+          <div class="row"><span class="small">daily at</span>
+            <input id="sense-at" type="time" value="04:00" style="width:auto">
+            <button class="primary">Add sense</button></div>
         </form>
       </details>
     </div>
@@ -295,11 +295,14 @@ async function refreshSenses() {
   const senses = await api("GET", "/senses");
   $("#senses").innerHTML = senses.map(s => `
     <div class="item ${s.enabled ? "" : "off"}" data-name="${esc(s.name)}">
-      <span class="name">${esc(s.name)}</span> <span class="small">every ${s.every_minutes} min${s.last_run ? " · last " + time(s.last_run) : ""}${s.search ? " · search" : ""}</span>
+      <span class="name">${esc(s.name)}</span> <span class="small">daily at
+        <input type="time" value="${esc(s.daily_at)}" data-act="at" style="width:auto;padding:1px 4px">
+        ${esc(s.timezone)}${s.last_run ? " · last ran " + new Date(s.last_run).toLocaleString() : ""}${s.search ? " · search" : ""}</span>
       <div class="small">${esc(s.instruction)}</div>
       <div class="small mono">${(s.feeds || []).map(esc).join("<br>") || "no feeds"}</div>
       <div class="actions">
         <button data-act="toggle" data-on="${s.enabled}">${s.enabled ? "Disable" : "Enable"}</button>
+        <button data-act="run" title="Run once now, enabled or not">Run now</button>
         <button data-act="delete">Delete</button>
       </div>
     </div>`).join("") || `<p class="small">No senses.</p>`;
@@ -310,13 +313,25 @@ $("#senses").addEventListener("click", async (e) => {
   const name = btn.closest(".item").dataset.name;
   if (btn.dataset.act === "toggle") await api("PUT", `/senses/${name}`, {enabled: btn.dataset.on !== "true"});
   if (btn.dataset.act === "delete" && confirm(`Delete sense "${name}"?`)) await api("DELETE", `/senses/${name}`);
+  if (btn.dataset.act === "run") {
+    const r = await fetch(`/senses/${name}/run`, {method: "POST"});
+    if (r.status === 409) { alert("Stopped. Resume first."); return; }
+    btn.textContent = "Running…"; btn.disabled = true;
+    setTimeout(refreshSenses, 30000);
+    return;
+  }
   refreshSenses();
+});
+$("#senses").addEventListener("change", async (e) => {
+  if (e.target.dataset.act !== "at" || !e.target.value) return;
+  const name = e.target.closest(".item").dataset.name;
+  await api("PUT", `/senses/${name}`, {daily_at: e.target.value}); refreshSenses();
 });
 
 $("#sense-form").addEventListener("submit", async (e) => {
   e.preventDefault();
   await api("POST", "/senses", {name: $("#sense-name").value.trim(),
-    instruction: $("#sense-instruction").value, every_minutes: +$("#sense-every").value || 240,
+    instruction: $("#sense-instruction").value, daily_at: $("#sense-at").value || "04:00",
     feeds: $("#sense-feeds").value.split("\n").map(x => x.trim()).filter(Boolean),
     search: $("#sense-search").checked});
   e.target.reset(); refreshSenses();

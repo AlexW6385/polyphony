@@ -210,3 +210,20 @@ def test_runtime_config_rejects_bad_edits(patch):
 
     with pytest.raises(ValueError):
         rc.merge({}, patch)
+
+
+def test_sense_runs_at_the_next_daily_time_only():
+    from datetime import datetime, timezone
+
+    from polyphony.sense import check_daily_at, next_run
+
+    tz = "America/Toronto"
+    # 03:00 Toronto (07:00 UTC in November): today's 04:00 is still ahead.
+    assert next_run("04:00", tz, datetime(2026, 11, 2, 8, 0, tzinfo=timezone.utc)) == \
+        datetime(2026, 11, 2, 9, 0, tzinfo=timezone.utc)
+    # just after 04:00 Toronto: tomorrow, never "right now"
+    assert next_run("04:00", tz, datetime(2026, 11, 2, 9, 1, tzinfo=timezone.utc)) == \
+        datetime(2026, 11, 3, 9, 0, tzinfo=timezone.utc)
+    assert check_daily_at("4:05") == "04:05"
+    with pytest.raises(ValueError):
+        check_daily_at("24:00")

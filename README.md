@@ -46,7 +46,7 @@ Without Docker: Python 3.12+, PostgreSQL 16, Redis 7, then
 | **listen** | a voice reading the score and deciding whether to speak; it either speaks or **rests** |
 | **cadence** | a weighted vote on a resolution; one at a time, and everyone else waits |
 | **digest** | the outcome of a stretch of the score, written after 90 s of quiet |
-| **sense** | a standing instruction that brings news from your feeds in as `world` thoughts |
+| **sense** | a standing instruction that brings news from your feeds in as `world` thoughts, once a day |
 
 The files under `mind/` seed the database on first start; after that, edit the key, voices and
 senses live from the page.
@@ -69,10 +69,14 @@ Set the provider, key and the two models on the settings page, or in `.env`
 ```yaml
 - name: world
   instruction: "The most important world news of the last day."
-  every_minutes: 240
+  daily_at: "04:00"        # once a day, local time (TIMEZONE, default America/Toronto)
+  enabled: false           # the shipped senses are off; enable on the page or press Run now
   feeds: [https://feeds.bbci.co.uk/news/world/rss.xml]
   search: false            # true + EXA_API_KEY or TAVILY_API_KEY: background search
 ```
+
+A sense never runs because the room was resumed or restarted: only at its daily time, or once
+by hand with **Run now**.
 
 Each run is a small LangGraph workflow (collect, triage, [search], read, summarise, emit) over
 MCP: our `polyphony-feeds` server (RSS/Atom, SSRF-guarded), the official `mcp-server-fetch` for
@@ -124,7 +128,7 @@ export (`scripts/export_listen_samples.py`), a Colab notebook
 | `GET /settings` | provider, API key, listen and speak models, monitoring charts |
 | `GET/PUT /config` · `POST /config/test/{listen\|speak}` | what the page reads and saves; the key is stored in the database and never returned |
 | `GET /stats?hours=` | calls, tokens, latency, errors, calls over time |
-| `/voices`, `/senses` | manage live |
+| `/voices`, `/senses` · `POST /senses/{name}/run` | manage live; run a sense once now |
 
 ## Tests
 

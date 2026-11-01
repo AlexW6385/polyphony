@@ -128,7 +128,7 @@ class SenseRow(Base):
 
     name: Mapped[str] = mapped_column(String(64), primary_key=True)
     instruction: Mapped[str] = mapped_column(Text)
-    every_minutes: Mapped[int] = mapped_column(Integer)
+    daily_at: Mapped[str] = mapped_column(String(5), default="04:00", server_default="04:00")
     feeds: Mapped[list[str]] = mapped_column(JSONB, default=list, server_default="[]")
     search: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
@@ -138,7 +138,7 @@ class SenseRow(Base):
         return {
             "name": self.name,
             "instruction": self.instruction,
-            "every_minutes": self.every_minutes,
+            "daily_at": self.daily_at,
             "feeds": list(self.feeds or []),
             "search": bool(self.search),
             "enabled": self.enabled,

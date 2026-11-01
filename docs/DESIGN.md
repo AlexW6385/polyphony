@@ -29,6 +29,12 @@ thoughts) remain.
 **Settings:** one provider, one API key, a listen model and a speak model, on the settings
 page; the teacher and senses follow speak; timings are fixed (digest after 90 s of quiet).
 
+**Senses** run once a day at a fixed local time (`daily_at`, default 04:00, `TIMEZONE`), not
+on an interval, so resuming or restarting never sets one off and none cuts into a discussion
+at a random moment; `POST /senses/{name}/run` (**Run now**) runs one once by hand. The shipped
+two are off by default. **Stop all** is stored in PostgreSQL, so it survives
+`docker compose down`.
+
 The v1 sections below are kept as the record of how the system was designed; where they use
 the old words or describe removed parts, this section wins.
 

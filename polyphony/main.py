@@ -21,6 +21,7 @@ from .db import KeyRow, LLMCall, SenseRow, VoiceRow, init_db, make_engine, make_
 from .key import KEY_ROW, Key
 from .score import Score
 from .supervisor import Supervisor
+from .sense import DEFAULT_DAILY_AT, check_daily_at
 from .voice import VoiceSpec
 
 log = logging.getLogger("polyphony")
@@ -48,7 +49,8 @@ async def seed(score: Score, settings: Settings) -> None:
             if settings.senses_file.exists():
                 for entry in yaml.safe_load(settings.senses_file.read_text()) or []:
                     s.add(SenseRow(name=entry["name"], instruction=entry["instruction"],
-                                   every_minutes=int(entry.get("every_minutes", 240)),
+                                   daily_at=check_daily_at(entry.get("daily_at", DEFAULT_DAILY_AT)),
+                                   enabled=bool(entry.get("enabled", True)),
                                    feeds=list(entry.get("feeds") or []),
                                    search=bool(entry.get("search", False))))
                     n += 1

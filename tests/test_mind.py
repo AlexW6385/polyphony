@@ -226,10 +226,10 @@ async def test_sense_reads_feeds_and_appends_world_thought_once(score, settings,
 
     fake.script = script
     async with score.sessions() as s:
-        s.add(SenseRow(name="ai-policy", instruction="AI policy news", every_minutes=240,
+        s.add(SenseRow(name="ai-policy", instruction="AI policy news",
                        feeds=["https://ex.com/rss"]))
         await s.commit()
-    sense = Sense(SenseSpec("ai-policy", "AI policy news", 240, ("https://ex.com/rss",)),
+    sense = Sense(SenseSpec("ai-policy", "AI policy news", "04:00", ("https://ex.com/rss",)),
                   score, settings)
     first = await sense.fetch_once(mcp=mcp)
     second = await sense.fetch_once(mcp=mcp)
@@ -336,8 +336,11 @@ async def test_api_validation(score, settings, fake):
         assert (await c.post("/voices", json={"name": "Bad Name", "text": "x"})).status_code == 422
         assert (await c.post("/voices", json={"name": "conscious", "text": "x"})).status_code == 422
         assert (await c.post("/thoughts", json={"content": "x", "kind": "voice"})).status_code == 422
-        r = await c.post("/senses", json={"name": "s", "instruction": "x", "every_minutes": 1})
-        assert r.json()["every_minutes"] == 30
+        r = await c.post("/senses", json={"name": "s", "instruction": "x", "daily_at": "4:05"})
+        assert r.json()["daily_at"] == "04:05" and r.json()["enabled"] is True
+        assert (await c.post("/senses", json={"name": "t", "instruction": "x",
+                                              "daily_at": "25:00"})).status_code == 422
+        assert (await c.post("/senses/nope/run")).status_code == 404
         assert (await c.get("/health")).json() == {"ok": True}
 
 

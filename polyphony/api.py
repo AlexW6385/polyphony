@@ -21,7 +21,7 @@ from .cadence import confirm_cadence, create_cadence, get_cadence, run_cadence
 from .config import Settings
 from .db import KeyRow, LLMCall, ListenSample, SenseRow, VoiceRow
 from .key import CONSCIOUS, KEY_ROW, get_key
-from .sense import MIN_EVERY_MINUTES
+from .sense import DEFAULT_DAILY_AT, Sense, SenseSpec, check_daily_at
 from .score import Score
 from .voice import VoiceSpec
 
@@ -62,14 +62,14 @@ class VoicePatch(BaseModel):
 class SenseIn(BaseModel):
     name: str
     instruction: str = Field(min_length=1)
-    every_minutes: int = 240
+    daily_at: str = DEFAULT_DAILY_AT
     feeds: list[str] = Field(default_factory=list)
     search: bool = False
 
 
 class SensePatch(BaseModel):
     instruction: str | None = None
-    every_minutes: int | None = None
+    daily_at: str | None = None
     feeds: list[str] | None = None
     search: bool | None = None
     enabled: bool | None = None
@@ -427,11 +427,29 @@ def create_app(score: Score, settings: Settings, lifespan=None) -> FastAPI:
 
     # ------------------------------------------------------------------ senses
 
+    def _daily_at(value: str) -> str:
+        try:
+            return check_daily_at(value)
+        except ValueError as e:
+            raise HTTPException(422, str(e))
+
     @app.get("/senses")
     async def list_senses():
         async with score.sessions() as s:
             rows = (await s.scalars(select(SenseRow).order_by(SenseRow.name))).all()
-        return [r.to_dict() for r in rows]
+        return [{**r.to_dict(), "timezone": settings.timezone} for r in rows]
+
+    @app.post("/senses/{name}/run", status_code=202)
+    async def run_sense(name: str):
+        """Run a sense once now, enabled or not, in the background."""
+        await refuse_if_paused()
+        async with score.sessions() as s:
+            row = await s.get(SenseRow, name)
+            if row is None:
+                raise HTTPException(404, "no such sense")
+            spec = SenseSpec.from_row(row)
+        spawn(Sense(spec, score, settings).fetch_once())
+        return {"started": name}
 
     @app.post("/senses", status_code=201)
     async def add_sense(x: SenseIn):
@@ -440,7 +458,7 @@ def create_app(score: Score, settings: Settings, lifespan=None) -> FastAPI:
             if await s.get(SenseRow, x.name):
                 raise HTTPException(409, "a sense with that name exists")
             row = SenseRow(name=x.name, instruction=x.instruction.strip(),
-                           every_minutes=max(MIN_EVERY_MINUTES, x.every_minutes),
+                           daily_at=_daily_at(x.daily_at),
                            feeds=_check_feeds(x.feeds), search=x.search, enabled=True)
             s.add(row)
             await s.commit()
@@ -456,8 +474,8 @@ def create_app(score: Score, settings: Settings, lifespan=None) -> FastAPI:
                 raise HTTPException(404, "no such sense")
             if x.instruction is not None:
                 row.instruction = x.instruction.strip()
-            if x.every_minutes is not None:
-                row.every_minutes = max(MIN_EVERY_MINUTES, x.every_minutes)
+            if x.daily_at is not None:
+                row.daily_at = _daily_at(x.daily_at)
             if x.feeds is not None:
                 row.feeds = _check_feeds(x.feeds)
             if x.search is not None:

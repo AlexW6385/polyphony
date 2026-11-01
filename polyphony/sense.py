@@ -1,10 +1,14 @@
 """A sense: a standing instruction plus the feeds the conscious part chose.
 
-On a schedule, a sense runs one workflow (sense_graph.py): read the feeds over
+Once a day at a fixed local time, a sense runs one workflow (sense_graph.py): read the feeds over
 MCP, let the model pick what matters, read the articles, summarise, and drop
 each new item into the score as a `world` thought. Items already seen (by URL
 or by title) are never appended twice. Works with any provider: nothing here
 depends on a vendor's built-in web search.
+
+A fixed daily time (default 04:00) instead of an interval means a sense never runs just
+because the room was resumed or restarted, and never cuts into a discussion at a random
+moment. It can also be run once by hand (`POST /senses/{name}/run`).
 """
 
 from __future__ import annotations
@@ -17,6 +21,7 @@ import re
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert
@@ -27,25 +32,43 @@ from .score import Score
 
 log = logging.getLogger(__name__)
 
-MIN_EVERY_MINUTES = 30
-FIRST_RUN_DELAY = 10  # seconds after start, for a sense that has never run
+DEFAULT_DAILY_AT = "04:00"
+
+
+def check_daily_at(value: str) -> str:
+    """Normalise "H:MM" / "HH:MM" to "HH:MM"; ValueError if it is not a time of day."""
+    m = re.fullmatch(r"\s*(\d{1,2}):(\d{2})\s*", str(value or ""))
+    if not m or int(m.group(1)) > 23 or int(m.group(2)) > 59:
+        raise ValueError(f"not a time of day (HH:MM): {value!r}")
+    return f"{int(m.group(1)):02d}:{m.group(2)}"
+
+
+def next_run(daily_at: str, tz: str, now: datetime | None = None) -> datetime:
+    """The next time `daily_at` (local to `tz`) comes round, strictly after `now`, in UTC."""
+    zone = ZoneInfo(tz)
+    local = (now or datetime.now(timezone.utc)).astimezone(zone)
+    h, m = map(int, check_daily_at(daily_at).split(":"))
+    target = local.replace(hour=h, minute=m, second=0, microsecond=0)
+    if target <= local:
+        target = (target + timedelta(days=1)).replace(hour=h, minute=m)
+    return target.astimezone(timezone.utc)
 
 
 @dataclass(frozen=True)
 class SenseSpec:
     name: str
     instruction: str
-    every_minutes: int
+    daily_at: str = DEFAULT_DAILY_AT
     feeds: tuple[str, ...] = ()
     search: bool = False
 
     @classmethod
     def from_row(cls, row: SenseRow) -> SenseSpec:
-        return cls(row.name, row.instruction, max(MIN_EVERY_MINUTES, row.every_minutes),
+        return cls(row.name, row.instruction, row.daily_at or DEFAULT_DAILY_AT,
                    tuple(row.feeds or ()), bool(row.search))
 
     def fingerprint(self) -> str:
-        blob = json.dumps([self.instruction, self.every_minutes, list(self.feeds), self.search])
+        blob = json.dumps([self.instruction, self.daily_at, list(self.feeds), self.search])
         return hashlib.sha256(blob.encode()).hexdigest()
 
 
@@ -72,27 +95,17 @@ class Sense:
     def name(self) -> str:
         return self.spec.name
 
-    async def _last_run(self) -> datetime | None:
-        async with self.score.sessions() as s:
-            row = await s.get(SenseRow, self.name)
-            return row.last_run if row else None
-
     async def run(self) -> None:
         while True:
-            last = await self._last_run()
-            every = timedelta(minutes=self.spec.every_minutes)
-            if last is None:
-                wait = FIRST_RUN_DELAY
-            else:
-                wait = max(0.0, (last + every - datetime.now(timezone.utc)).total_seconds())
-            await asyncio.sleep(wait)
+            at = next_run(self.spec.daily_at, self.settings.timezone)
+            await asyncio.sleep(max(0.0, (at - datetime.now(timezone.utc)).total_seconds()))
             try:
                 await self.fetch_once()
             except asyncio.CancelledError:
                 raise
             except Exception:
                 log.exception("sense %s: fetch failed", self.name)
-                await self._touch()  # don't hammer a failing provider; try next period
+                await self._touch()
 
     async def _touch(self) -> None:
         async with self.score.sessions() as s:
