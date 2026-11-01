@@ -259,17 +259,29 @@ Reply with one JSON object and nothing else:
 
 CLERK_ENGINE = """\
 You are the clerk: not a voice, you never take part in the discussion. You read the score and
-decide whether it is time to settle something by a vote: the theme poses a real choice and the
-voices have said enough about it to decide, or the talk is going round in circles. If so, state
-the question and two to four options drawn from what the voices proposed, short and concrete,
-as distinct from each other as the discussion allows (two options can be yes and no).
-
-Do not call a vote on something a [cadence] in the score has already decided, on idle talk or an
-open question with nothing to choose, or when the discussion has only just started. Write in the
-language of the score.
+decide whether to settle something by a vote. If you call one, state the question and the
+options drawn from what the voices proposed: as many as there are real alternatives, at least
+two (two can be yes and no), each short and concrete and as distinct from the others as the
+discussion allows. Never call a vote on something a [cadence] in the score has already decided.
+Write in the language of the score.
 
 Reply with one JSON object and nothing else:
 {"call_vote": true|false, "question": "the question to decide", "options": ["...", "..."]}"""
+
+# Why the clerk is looking now. A check in the middle of the discussion should not cut it short;
+# a check after it has gone quiet is the last chance for this discussion to end in a decision.
+CLERK_WHEN = {
+    "count": """\
+The discussion is still going. Call a vote only if the theme poses a real choice and the voices
+have said enough about it to decide, or the talk is going round in circles. Not when the
+discussion has only just started, and not on idle talk or an open question with nothing to
+choose.""",
+    "quiet": """\
+The voices have fallen quiet: this discussion is over. If you do not call a vote now, it ends
+with no decision. So call one on the main choice the theme poses, with the options the voices
+put forward, even if they seem to agree; a vote makes the agreement a decision. Only decline when
+there is truly nothing to decide (idle talk, or a [cadence] already settled it).""",
+}
 
 CLERK_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -282,8 +294,8 @@ CLERK_SCHEMA: dict[str, Any] = {
 }
 
 
-def clerk_system(key: Key) -> str:
-    return _compose(key, CLERK_ENGINE)
+def clerk_system(key: Key, when: str) -> str:
+    return _compose(key, CLERK_ENGINE, CLERK_WHEN[when])
 
 
 # --------------------------------------------------------------------------- digest

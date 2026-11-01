@@ -50,8 +50,12 @@ just turned down is not proposed again straight away.
 **The clerk calls the votes.** Voices no longer propose cadences, and nothing is started by
 hand. The clerk, an edge component like the digest and not a voice, checks the discussion every
 15 new thoughts and once after 30 s of quiet that follows something new. Each check is one call
-on the speak model that answers whether a vote is due and, if so, the question and two to four
-options drawn from the discussion. The cadence weighs the voices as before, then each voice
+on the speak model that answers whether a vote is due and, if so, the question and its options
+(at least two, as many as there are real alternatives) drawn from the discussion. The prompt
+differs by trigger: mid-discussion (every 15) it calls a vote only when one is clearly due;
+after 30 s of quiet the discussion is over and would otherwise end with no decision, so it
+calls one on the main choice, even when the voices seem to agree, unless there is truly nothing
+to decide. The cadence weighs the voices as before, then each voice
 supports any number of the options (approval voting); an option wins with more than half of the
 weighted support and strictly ahead of the next, otherwise the question stays open. The
 yes/no "worth deciding now?" round and the confirm step are gone, as are `POST /cadence` and

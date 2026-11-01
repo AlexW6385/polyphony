@@ -45,7 +45,7 @@ Without Docker: Python 3.12+, PostgreSQL 16, Redis 7, then
 | **score** | the one shared, ordered record of thoughts |
 | **theme** | a thought you drop in, as the conscious part |
 | **listen** | a voice reading the score and deciding whether to speak; it either speaks or **rests** |
-| **clerk** | not a voice: every 15 new thoughts, and after 30 s of quiet, decides whether a vote is due and drafts its question and two to four options |
+| **clerk** | not a voice: every 15 new thoughts, and after 30 s of quiet, decides whether a vote is due and drafts its question and options; after quiet the discussion is over, so it calls a vote unless there is truly nothing to decide |
 | **cadence** | the vote: voices weigh each other, then support any of the options; the top option wins with more than half; one at a time, everyone else waits |
 | **digest** | the outcome of a stretch of the score, written after 90 s of quiet |
 | **sense** | a standing instruction that brings news from your feeds in as `world` thoughts, once a day |

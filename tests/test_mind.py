@@ -171,6 +171,7 @@ async def test_clerk_calls_a_vote_when_due(score, settings, fake):
 
     async def script(system, user, json):
         if "You are the clerk" in system:
+            assert "still going" in system  # the every-15 check, mid-discussion
             return _j(call_vote=True, question="Tomorrow?", options=["ride", "study"])
         return await votes(system, user, json)
 
@@ -189,7 +190,7 @@ async def test_clerk_calls_a_vote_when_due(score, settings, fake):
 
     # quiet after new talk also triggers a check; the clerk may decline to call a vote
     async def no_vote(system, user, json):
-        assert "You are the clerk" in system
+        assert "You are the clerk" in system and "this discussion is over" in system
         return _j(call_vote=False, question="", options=[])
 
     fake.script = no_vote
