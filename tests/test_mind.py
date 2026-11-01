@@ -351,6 +351,10 @@ async def test_pause_stops_everything_and_resume_restarts(score, settings, mind,
             await asyncio.sleep(0.1)
         assert not mind.voices and not mind.edges
         assert (await c.get("/pause")).json() == {"paused": True}
+        # Redis can be wiped (it has no volume); the flag lives in PostgreSQL.
+        async for k in score.redis.scan_iter(match=f"{score.namespace}:*"):
+            await score.redis.delete(k)
+        assert await score.paused()
         assert (await c.post("/cadence", json={"resolution": "go"})).status_code == 409
 
         # a thought still lands while paused, but nobody answers it

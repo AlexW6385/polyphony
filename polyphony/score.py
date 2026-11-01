@@ -18,7 +18,7 @@ import redis.asyncio as aioredis
 from sqlalchemy import desc, func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from .db import Listen, Thought
+from .db import AppSetting, Listen, Thought
 
 log = logging.getLogger(__name__)
 
@@ -30,7 +30,7 @@ K_FORMING = "forming"  # set of voice names currently composing
 K_LISTEN = "listen:"  # + voice name -> latest listen JSON
 K_CONTROL = "control"  # pub/sub; {"voices"|"senses"|"key": "changed"}
 K_CADENCE = "cadence:running"  # set while a cadence is running (with a TTL)
-K_PAUSED = "paused"  # set while everything is stopped (no TTL: survives app restarts)
+PAUSED_ROW = "paused"  # app_settings row: kept in PostgreSQL so it survives a Redis wipe
 
 KINDS = {"voice", "theme", "world", "cadence", "digest"}
 # Older names for a theme (the human's thought) and for its author.
@@ -201,18 +201,28 @@ class Score:
         await self.redis.publish(self.redis_key(K_CONTROL), json.dumps({what: "changed"}))
 
     async def paused(self) -> bool:
-        return bool(await self.redis.exists(self.redis_key(K_PAUSED)))
+        async with self.sessions() as s:
+            row = await s.get(AppSetting, PAUSED_ROW)
+        return bool(row and (row.value or {}).get("on"))
 
     async def set_paused(self, on: bool) -> None:
-        """Stop or restart every voice, sense and background component, in any process."""
+        """Stop or restart every voice, sense and background component, in any process.
+
+        The flag lives in PostgreSQL, not Redis: Redis has no volume, so `docker compose
+        down` would forget it and the room would start running on the next `up`.
+        """
+        async with self.sessions() as s:
+            row = await s.get(AppSetting, PAUSED_ROW)
+            if row is None:
+                s.add(AppSetting(key=PAUSED_ROW, value={"on": on}))
+            else:
+                row.value = {"on": on}
+            await s.commit()
         if on:
-            await self.redis.set(self.redis_key(K_PAUSED), "1")
             # A cadence cut off mid-way would otherwise hold voices back until its TTL.
             async for k in self.redis.scan_iter(match=self.redis_key(K_CADENCE) + ":*", count=100):
                 await self.redis.delete(k)
             await self.redis.delete(self.redis_key(K_FORMING))
-        else:
-            await self.redis.delete(self.redis_key(K_PAUSED))
         await self.publish_control("paused")
 
     async def cadence_running(self) -> bool:

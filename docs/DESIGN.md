@@ -560,11 +560,11 @@ it means.
   thread from the one in front of them without a rule saying so.
 - **Waker**: one random voice is woken after a quiet stretch, once per stretch (see *The voice
   loop*). Off with `IDLE_WAKE_SECONDS=0`; evals and the simulator turn it off.
-- **One switch stops everything.** `POST /pause` (the **Stop all** button) sets a Redis flag
-  with no TTL; the supervisor then stops every voice, sense and edge component, the API
-  cancels its running cadences and refuses new ones and digests, and cadence-running flags are
-  cleared. Thoughts can still be dropped in. The flag outlives an app restart, so a stopped
-  room stays stopped until `POST /resume`.
+- **One switch stops everything.** `POST /pause` (the **Stop all** button) sets a flag in the
+  `app_settings` table (PostgreSQL, so it survives a Redis wipe and `docker compose down`);
+  the supervisor then stops every voice, sense and edge component, the API cancels its running
+  cadences and refuses new ones and digests, and cadence-running flags are cleared. Themes can
+  still be dropped in. A stopped room stays stopped across restarts until `POST /resume`.
 
 ## Not built (deliberately)
 
