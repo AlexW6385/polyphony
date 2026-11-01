@@ -8,3 +8,4 @@ build/
 data/
 reports/
 evals/results/
+.DS_Store

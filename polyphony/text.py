@@ -1,4 +1,4 @@
-"""Small text helpers shared by voices, frames and ensembles."""
+"""Small text helpers shared by voices and the key."""
 
 from __future__ import annotations
 

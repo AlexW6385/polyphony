@@ -1,6 +1,40 @@
-# Polyphony — design (v1)
+# Polyphony — design
 
-> A polyphony of anything: many voices, no conductor.
+> Many voices of one mind, no conductor.
+
+## Current state (v1.1)
+
+Polyphony is now one thing: the inner voices of one mind discussing what the conscious part
+brings in. The general "polyphony of anything" engine described in the v1 sections below was
+narrowed to that, and its words were changed to one consistent, lightly musical set.
+
+**Words** (code, API and page use the same ones):
+
+| now | was | meaning |
+|---|---|---|
+| **score** (`Score`, `score.py`, `GET /score`) | stream | the one shared, ordered record of thoughts |
+| **key** (`Key`, `key.py`, `keys` table, `GET/PUT /key`, `mind/key.md`) | frame | what this mind is and how its voices relate; first in every prompt |
+| **theme** (thought kind `theme`, author `conscious`) | person / conscious thought | what the conscious part drops in |
+| **rest** | quiet | a listen that chooses not to speak |
+| voice, listen, speak, cadence, digest, sense | unchanged | |
+
+**Removed:** ensembles (one set of key, voices and senses under `mind/`; the `ENSEMBLE`
+setting and the `council` and `public` examples are gone; the human is always `conscious`);
+memory (embeddings, pgvector retrieval, `/memories`); the waker (no voice is woken after
+quiet: a quiet score is the end of a discussion); `ENABLED_VOICES` (voices are switched on and
+off on the page); local listen by default (listen is `claude-haiku-5-5`, speak
+`claude-sonnet-5-5`; the distillation tooling stays for later). Strays (a few random older
+thoughts) remain.
+
+**Settings:** one provider, one API key, a listen model and a speak model, on the settings
+page; the teacher and senses follow speak; timings are fixed (digest after 90 s of quiet).
+
+The v1 sections below are kept as the record of how the system was designed; where they use
+the old words or describe removed parts, this section wins.
+
+---
+
+## v1 design record
 
 This document replaces the v0 design notes. Everything v0 decided still holds unless a section
 below says otherwise; the v0 build is the starting point, not something to throw away. The
@@ -136,7 +170,7 @@ Three ensembles ship as examples:
 
 - `mind` — ten voices written from the author's own head, each described in a sentence or
   two of Chinese: what it cares about and how it talks (`worldbuilder`, `aesthete`, `restraint`, `deriver`, `seeker`, `restless`,
-  `pragmatist`, `trickster`, `poet`, `explainer`). They replaced the generic v0 voices, which
+  `pragmatist`, `trickster`, `feeling`, `explainer`). They replaced the generic v0 voices, which
   were roles (a fact-checker, a fairness reviewer) and carried "stay quiet when…" rules in
   their own text.
 - `council` — a handful of distinct people deciding something together (e.g. a family
@@ -503,6 +537,25 @@ it means.
   voice cares about and how it talks keeps the style without the material. The shared engine
   text also says the voices are in one conversation and should respond to the stream rather
   than to topics of their own.
+- **Votes are part of the conversation.** The shared engine text says a passed resolution is
+  decided and should be built on, not argued again; voices propose a vote when talk goes round
+  in circles, and re-propose when one failed only on its wording. Nothing stops the room after
+  a vote: the result is simply in the stream.
+- **One cadence at a time.** A proposal or a manual cadence takes a single Redis slot
+  (`SET NX`) that counts as "cadence running", so voices hold back during the proposal phase
+  too, and two voices proposing at the same moment cannot start two votes; the second is
+  dropped. `POST /cadence` answers 409 while the slot is held.
+- **Plain talk.** The engine text asks voices not to invent facts that are not in the stream and
+  not to dress things up with sentiment or imagery.
+- **Settings from the page override `.env`, and are few.** One provider, one key, a listen
+  model and a speak model, saved in one `app_settings` row and applied onto the shared
+  `Settings` object at startup and on every supervisor sync; the teacher and senses follow
+  speak, and a change restarts the voices (their fingerprint includes the models and a hash
+  of the key). The key is write-only from the page's side. Timings (digest after 90 s of
+  quiet, waker, teacher sample rate) are fixed defaults, not page settings. The embedding
+  model stays in `.env`: it fixes the memory table's vector size.
+- **The digest leads with the outcome**, then the question in one line and one short line per
+  voice, in the stream's language.
 - **Every rendered thought carries its age** (`[12, 3 hours ago]`), so voices can tell an old
   thread from the one in front of them without a rule saying so.
 - **Waker**: one random voice is woken after a quiet stretch, once per stretch (see *The voice
@@ -627,6 +680,9 @@ GET  /memories?seq=<n>&k=5     debug: what memory retrieves for a point in the s
 POST /digest                   write a digest now for everything since the last one
 POST /pause  POST /resume      stop / restart every voice, sense and background component
 GET  /pause                    {paused}
+GET  /settings                 settings page (keys, models, behaviour, monitoring)
+GET  /config  PUT /config      provider, key, listen/speak models; the key is write-only
+POST /config/test/{tier}       one tiny call on listen or speak
 GET  /digests?limit=20         recent digests
 ```
 

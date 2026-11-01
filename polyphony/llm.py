@@ -2,8 +2,7 @@
 
 One interface, `Provider.complete()`, hides the vendor. Tiers (listen, speak,
 sense, teacher) each pick a provider/model/base URL/key independently, and a
-voice may override its listen/speak tier in its front matter. Embeddings go
-through `Provider.embed()` where the vendor has one.
+voice may override its listen/speak tier in its front matter.
 
 Every call is traced: `set_tracer()` installs a callback that receives one
 `Trace` per call (main.py writes them to `llm_calls`).
@@ -129,9 +128,6 @@ class OpenAIProvider:
             cached_input_tokens=cached,
         )
 
-    async def embed(self, *, model: str, texts: list[str]) -> list[list[float]]:
-        resp = await self.client.embeddings.create(model=model, input=texts)
-        return [d.embedding for d in resp.data]
 
 
 def _strict(schema: dict[str, Any]) -> dict[str, Any]:
@@ -201,10 +197,6 @@ class OllamaProvider:
             server_ms=int(d["total_duration"] / 1e6) if d.get("total_duration") else None,
         )
 
-    async def embed(self, *, model: str, texts: list[str]) -> list[list[float]]:
-        d = await self._post("/api/embed", {"model": model, "input": texts,
-                                            "keep_alive": self.keep_alive})
-        return d["embeddings"]
 
 
 # --------------------------------------------------------------------------- Anthropic
@@ -226,7 +218,7 @@ class AnthropicProvider:
 
     async def complete(self, *, model, system, user, json=False, schema=None, temperature=0.8,
                        max_tokens=1024) -> Completion:
-        # The system prompt is frame + engine (+ voice): mark it cacheable so the shared
+        # The system prompt is key + engine (+ voice): mark it cacheable so the shared
         # prefix is billed once. Temperature is not sent; default sampling is fine.
         # Current models think by default and thinking counts against max_tokens, so a
         # 1024 cap could leave a JSON reply empty or cut off: give it headroom, and keep
@@ -298,9 +290,6 @@ class GeminiProvider:
             cached_input_tokens=getattr(u, "cached_content_token_count", None),
         )
 
-    async def embed(self, *, model: str, texts: list[str]) -> list[list[float]]:
-        resp = await self.client.aio.models.embed_content(model=model, contents=texts)
-        return [e.values for e in resp.embeddings]
 
 
 # --------------------------------------------------------------------------- registry
@@ -493,20 +482,3 @@ async def complete_text(
     text = await _call(tier, tier_name=tier_name, purpose=purpose, voice=voice, system=system,
                        user=user, temperature=temperature, max_tokens=max_tokens)
     return text.strip()
-
-
-async def embed(tier: TierConfig, texts: list[str]) -> list[list[float]]:
-    provider = get_provider(tier)
-    fn = getattr(provider, "embed", None)
-    if fn is None:
-        raise LLMError(f"provider {tier.provider!r} has no embeddings")
-    start = time.perf_counter()
-    try:
-        out = await fn(model=tier.model, texts=texts)
-    except Exception as e:
-        _emit(Trace("embed", tier.provider, tier.model, "embed", None,
-                    int((time.perf_counter() - start) * 1000), ok=False, error=str(e)[:500]))
-        raise
-    _emit(Trace("embed", tier.provider, tier.model, "embed", None,
-                int((time.perf_counter() - start) * 1000)))
-    return out

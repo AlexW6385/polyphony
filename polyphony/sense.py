@@ -1,8 +1,8 @@
-"""A sense: a standing instruction plus the feeds the person chose.
+"""A sense: a standing instruction plus the feeds the conscious part chose.
 
 On a schedule, a sense runs one workflow (sense_graph.py): read the feeds over
 MCP, let the model pick what matters, read the articles, summarise, and drop
-each new item into the stream as a `world` thought. Items already seen (by URL
+each new item into the score as a `world` thought. Items already seen (by URL
 or by title) are never appended twice. Works with any provider: nothing here
 depends on a vendor's built-in web search.
 """
@@ -23,7 +23,7 @@ from sqlalchemy.dialects.postgresql import insert
 
 from .config import Settings
 from .db import SenseLog, SenseRow
-from .stream import Stream
+from .score import Score
 
 log = logging.getLogger(__name__)
 
@@ -63,9 +63,9 @@ def fingerprints(item: dict[str, Any]) -> list[str]:
 
 
 class Sense:
-    def __init__(self, spec: SenseSpec, stream: Stream, settings: Settings):
+    def __init__(self, spec: SenseSpec, score: Score, settings: Settings):
         self.spec = spec
-        self.stream = stream
+        self.score = score
         self.settings = settings
 
     @property
@@ -73,7 +73,7 @@ class Sense:
         return self.spec.name
 
     async def _last_run(self) -> datetime | None:
-        async with self.stream.sessions() as s:
+        async with self.score.sessions() as s:
             row = await s.get(SenseRow, self.name)
             return row.last_run if row else None
 
@@ -95,7 +95,7 @@ class Sense:
                 await self._touch()  # don't hammer a failing provider; try next period
 
     async def _touch(self) -> None:
-        async with self.stream.sessions() as s:
+        async with self.score.sessions() as s:
             await s.execute(update(SenseRow).where(SenseRow.name == self.name)
                             .values(last_run=datetime.now(timezone.utc)))
             await s.commit()
@@ -106,17 +106,17 @@ class Sense:
         `mcp` is anything with `has()` and `call()`; default: real MCP servers over stdio.
         """
         from . import sense_graph
-        from .frame import get_frame
+        from .key import get_key
         from .mcp_client import MCPClient, search_tool
 
-        frame = await get_frame(self.stream.sessions, self.settings.ensemble)
+        key = await get_key(self.score.sessions)
         if not self.spec.feeds:
             log.info("sense %s: no feeds configured", self.name)
             await self._touch()
             return []
 
         async def go(client):
-            graph = sense_graph.build(sense=self, settings=self.settings, frame=frame, mcp=client,
+            graph = sense_graph.build(sense=self, settings=self.settings, key=key, mcp=client,
                                       search=search_tool(self.settings) if client.has("search")
                                       else None)
             return await graph.ainvoke({})
@@ -154,17 +154,17 @@ class Sense:
         # Claim the fingerprints first; if another process beat us, skip.
         if not await self._claim(fps):
             return None
-        t = await self.stream.append(self.name, "world", content, meta=meta)
+        t = await self.score.append(self.name, "world", content, meta=meta)
         await self._attach_seq(fps, t["seq"])
         return t
 
     async def _seen(self, fps: list[str]) -> bool:
-        async with self.stream.sessions() as s:
+        async with self.score.sessions() as s:
             hit = await s.scalar(select(SenseLog.id).where(SenseLog.fingerprint.in_(fps)).limit(1))
             return hit is not None
 
     async def _claim(self, fps: list[str]) -> bool:
-        async with self.stream.sessions() as s:
+        async with self.score.sessions() as s:
             res = await s.execute(
                 insert(SenseLog)
                 .values([{"sense": self.name, "fingerprint": fp} for fp in fps])
@@ -176,6 +176,6 @@ class Sense:
             return claimed == len(fps)
 
     async def _attach_seq(self, fps: list[str], seq: int) -> None:
-        async with self.stream.sessions() as s:
+        async with self.score.sessions() as s:
             await s.execute(update(SenseLog).where(SenseLog.fingerprint.in_(fps)).values(seq=seq))
             await s.commit()

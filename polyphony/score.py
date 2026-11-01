@@ -1,4 +1,4 @@
-"""The stream: the only shared thing.
+"""The score: the only shared thing.
 
 PostgreSQL decides the order of record (`seq`). Redis holds a cache of the
 recent window, the set of voices currently forming, every voice's latest
@@ -28,16 +28,17 @@ K_THOUGHTS = "thoughts"  # pub/sub; payload = thought JSON
 K_RECENT = "recent"  # sorted set of thought JSON scored by seq, trimmed to the window
 K_FORMING = "forming"  # set of voice names currently composing
 K_LISTEN = "listen:"  # + voice name -> latest listen JSON
-K_CONTROL = "control"  # pub/sub; {"voices"|"senses"|"frame": "changed"}
+K_CONTROL = "control"  # pub/sub; {"voices"|"senses"|"key": "changed"}
 K_CADENCE = "cadence:running"  # set while a cadence is running (with a TTL)
-K_MEMQ = "memq:"  # + tail seq -> cached memory retrieval
 K_PAUSED = "paused"  # set while everything is stopped (no TTL: survives app restarts)
 
-KINDS = {"voice", "person", "world", "cadence", "digest"}
-ALIASES = {"conscious": "person"}  # v0 name for the human's thoughts
+KINDS = {"voice", "theme", "world", "cadence", "digest"}
+# Older names for a theme (the human's thought) and for its author.
+ALIASES = {"person": "theme", "conscious": "theme"}
+AUTHOR_ALIASES = {"person": "conscious"}
 
 
-class Stream:
+class Score:
     def __init__(self, sessions: async_sessionmaker, redis: aioredis.Redis, window: int = 40,
                  namespace: str = "polyphony"):
         self.sessions = sessions
@@ -45,7 +46,7 @@ class Stream:
         self.window = window
         self.namespace = namespace
 
-    def key(self, suffix: str) -> str:
+    def redis_key(self, suffix: str) -> str:
         return f"{self.namespace}:{suffix}"
 
     # ---------------------------------------------------------------- thoughts
@@ -60,8 +61,7 @@ class Stream:
     ) -> dict[str, Any]:
         """Commit to PostgreSQL first (that assigns `seq`), then cache + publish."""
         kind = ALIASES.get(kind, kind)
-        if author in ALIASES:
-            author = ALIASES[author]
+        author = AUTHOR_ALIASES.get(author, author)
         if kind not in KINDS:
             raise ValueError(f"unknown kind {kind!r}")
         async with self.sessions() as s:
@@ -74,15 +74,15 @@ class Stream:
         # A sorted set scored by seq: if two voices commit 5 and 6 but push 6
         # first, trimming still drops the oldest *seq*, not the earliest push.
         async with self.redis.pipeline(transaction=False) as p:
-            p.zadd(self.key(K_RECENT), {payload: thought["seq"]})
-            p.zremrangebyrank(self.key(K_RECENT), 0, -self.window - 1)
-            p.publish(self.key(K_THOUGHTS), payload)
+            p.zadd(self.redis_key(K_RECENT), {payload: thought["seq"]})
+            p.zremrangebyrank(self.redis_key(K_RECENT), 0, -self.window - 1)
+            p.publish(self.redis_key(K_THOUGHTS), payload)
             await p.execute()
         return thought
 
     async def recent(self) -> list[dict[str, Any]]:
         """The recent window, ordered by `seq` (pushes can land out of order)."""
-        raw = await self.redis.zrange(self.key(K_RECENT), 0, -1)
+        raw = await self.redis.zrange(self.redis_key(K_RECENT), 0, -1)
         if not raw:
             return await self._refill()
         by_seq = {t["seq"]: t for t in map(json.loads, raw)}
@@ -96,8 +96,8 @@ class Stream:
         thoughts = [r.to_dict() for r in reversed(rows)]
         if thoughts:
             async with self.redis.pipeline(transaction=True) as p:
-                p.zadd(self.key(K_RECENT), {json.dumps(t): t["seq"] for t in thoughts})
-                p.zremrangebyrank(self.key(K_RECENT), 0, -self.window - 1)
+                p.zadd(self.redis_key(K_RECENT), {json.dumps(t): t["seq"] for t in thoughts})
+                p.zremrangebyrank(self.redis_key(K_RECENT), 0, -self.window - 1)
                 await p.execute()
         return thoughts
 
@@ -132,7 +132,7 @@ class Stream:
         nothing appended after that point is missed.
         """
         pubsub = self.redis.pubsub()
-        await pubsub.subscribe(self.key(K_THOUGHTS))
+        await pubsub.subscribe(self.redis_key(K_THOUGHTS))
         if ready is not None:
             ready.set()
         try:
@@ -140,7 +140,7 @@ class Stream:
                 if msg.get("type") == "message":
                     yield json.loads(msg["data"])
         finally:
-            await pubsub.unsubscribe(self.key(K_THOUGHTS))
+            await pubsub.unsubscribe(self.redis_key(K_THOUGHTS))
             await pubsub.aclose()
 
     # ---------------------------------------------------------------- listens
@@ -159,12 +159,12 @@ class Stream:
             await s.commit()
             await s.refresh(row)
             d = row.to_dict()
-        await self.redis.set(self.key(K_LISTEN) + voice, json.dumps(d))
+        await self.redis.set(self.redis_key(K_LISTEN) + voice, json.dumps(d))
         return d
 
     async def listens_latest(self) -> dict[str, dict[str, Any]]:
         """Every voice's latest listen, keyed by voice name."""
-        keys = [k async for k in self.redis.scan_iter(match=self.key(K_LISTEN) + "*")]
+        keys = [k async for k in self.redis.scan_iter(match=self.redis_key(K_LISTEN) + "*")]
         if not keys:
             return {}
         values = await self.redis.mget(keys)
@@ -181,48 +181,59 @@ class Stream:
         return [r.to_dict() for r in rows]
 
     async def forget_voice(self, voice: str) -> None:
-        await self.redis.delete(self.key(K_LISTEN) + voice)
-        await self.redis.srem(self.key(K_FORMING), voice)
+        await self.redis.delete(self.redis_key(K_LISTEN) + voice)
+        await self.redis.srem(self.redis_key(K_FORMING), voice)
 
     # ---------------------------------------------------------------- forming
 
     async def set_forming(self, voice: str, on: bool) -> None:
         if on:
-            await self.redis.sadd(self.key(K_FORMING), voice)
+            await self.redis.sadd(self.redis_key(K_FORMING), voice)
         else:
-            await self.redis.srem(self.key(K_FORMING), voice)
+            await self.redis.srem(self.redis_key(K_FORMING), voice)
 
     async def forming(self) -> list[str]:
-        return sorted(await self.redis.smembers(self.key(K_FORMING)))
+        return sorted(await self.redis.smembers(self.redis_key(K_FORMING)))
 
     # ---------------------------------------------------------------- control
 
     async def publish_control(self, what: str) -> None:
-        await self.redis.publish(self.key(K_CONTROL), json.dumps({what: "changed"}))
+        await self.redis.publish(self.redis_key(K_CONTROL), json.dumps({what: "changed"}))
 
     async def paused(self) -> bool:
-        return bool(await self.redis.exists(self.key(K_PAUSED)))
+        return bool(await self.redis.exists(self.redis_key(K_PAUSED)))
 
     async def set_paused(self, on: bool) -> None:
         """Stop or restart every voice, sense and background component, in any process."""
         if on:
-            await self.redis.set(self.key(K_PAUSED), "1")
+            await self.redis.set(self.redis_key(K_PAUSED), "1")
             # A cadence cut off mid-way would otherwise hold voices back until its TTL.
-            async for k in self.redis.scan_iter(match=self.key(K_CADENCE) + ":*", count=100):
+            async for k in self.redis.scan_iter(match=self.redis_key(K_CADENCE) + ":*", count=100):
                 await self.redis.delete(k)
-            await self.redis.delete(self.key(K_FORMING))
+            await self.redis.delete(self.redis_key(K_FORMING))
         else:
-            await self.redis.delete(self.key(K_PAUSED))
+            await self.redis.delete(self.redis_key(K_PAUSED))
         await self.publish_control("paused")
 
     async def cadence_running(self) -> bool:
-        async for _ in self.redis.scan_iter(match=self.key(K_CADENCE) + ":*", count=100):
+        async for _ in self.redis.scan_iter(match=self.redis_key(K_CADENCE) + ":*", count=100):
             return True
         return False
 
+    async def claim_cadence(self, ttl: int = 900) -> bool:
+        """Take the single cadence slot; False if a cadence (or proposal) is already under way.
+
+        The slot key matches `cadence_running()`, so voices hold back while it is held,
+        and two voices proposing at the same moment cannot start two votes.
+        """
+        return bool(await self.redis.set(f"{self.redis_key(K_CADENCE)}:slot", "1", nx=True, ex=ttl))
+
+    async def release_cadence(self) -> None:
+        await self.redis.delete(f"{self.redis_key(K_CADENCE)}:slot")
+
     async def set_cadence_running(self, cadence_id: int, on: bool, ttl: int = 900) -> None:
         """One key per running cadence; the TTL means a crash can't freeze the mind."""
-        key = f"{self.key(K_CADENCE)}:{cadence_id}"
+        key = f"{self.redis_key(K_CADENCE)}:{cadence_id}"
         if on:
             await self.redis.set(key, "1", ex=ttl)
         else:

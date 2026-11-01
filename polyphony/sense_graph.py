@@ -27,7 +27,7 @@ from langgraph.graph import END, START, StateGraph
 
 from . import llm, prompts
 from .config import Settings
-from .frame import Frame
+from .key import Key
 
 log = logging.getLogger(__name__)
 
@@ -54,7 +54,7 @@ def _escape(text: str) -> str:
     return text.replace("</article>", "</ article>").replace("</entry>", "</ entry>")
 
 
-def build(*, sense, settings: Settings, frame: Frame, mcp: MCPCaller,
+def build(*, sense, settings: Settings, key: Key, mcp: MCPCaller,
           search: tuple[str, str] | None):
     """`sense` is a sense.Sense (for dedup and append); `search` is (tool, query arg)."""
     spec = sense.spec
@@ -89,7 +89,7 @@ def build(*, sense, settings: Settings, frame: Frame, mcp: MCPCaller,
             for e in entries)
         reply = await llm.complete_json(
             settings.sense_tier,
-            prompts.triage_system(frame, spec.instruction, bool(search and spec.search), max_items),
+            prompts.triage_system(key, spec.instruction, bool(search and spec.search), max_items),
             f"Today is {prompts.today()}.\n\n{listing}",
             schema=prompts.TRIAGE_SCHEMA, temperature=0.2, tier_name="sense", purpose="triage",
         )
@@ -146,7 +146,7 @@ def build(*, sense, settings: Settings, frame: Frame, mcp: MCPCaller,
             blocks += "\n\n" + "\n\n".join(f"<article url=\"search\">\n{_escape(r[:4000])}\n"
                                            f"</article>" for r in state["search_results"])
         reply = await llm.complete_json(
-            settings.sense_tier, prompts.summarize_system(frame, spec.instruction, max_items),
+            settings.sense_tier, prompts.summarize_system(key, spec.instruction, max_items),
             f"Today is {prompts.today()}.\n\n{blocks}", temperature=0.3, max_tokens=1500,
             tier_name="sense", purpose="summarize",
         )

@@ -1,6 +1,6 @@
 """Run scenarios, judge them, write a report, compare reports.
 
-A scenario (polyphony/evals/scenarios/*.yaml): an ensemble, seed thoughts, a
+A scenario (polyphony/evals/scenarios/*.yaml): seed themes, a
 budget, and a description of a good run. Each run happens in its own database
 and Redis namespace (see harness.py), against the configured real models.
 Results go to evals/results/<timestamp>.json; `--compare A B` shows the
@@ -24,7 +24,7 @@ from sqlalchemy import func, select
 from ..config import get_settings
 from ..db import LLMCall, VoiceRow
 from ..digest import write_digest
-from ..frame import get_frame
+from ..key import get_key
 from ..harness import isolated, open_run, play
 from .judge import CRITERIA, judge
 
@@ -44,7 +44,7 @@ def load_scenarios(only: list[str] | None = None) -> dict[str, dict[str, Any]]:
 
 async def run_scenario(name: str, sc: dict[str, Any]) -> dict[str, Any]:
     base = get_settings()
-    settings = isolated(base, "eval", ensemble=sc["ensemble"], teacher_sample_rate=0.0)
+    settings = isolated(base, "eval", teacher_sample_rate=0.0)
     budget = sc.get("budget") or {}
     run = await open_run(settings)
     try:
@@ -53,19 +53,18 @@ async def run_scenario(name: str, sc: dict[str, Any]) -> dict[str, Any]:
                                    timeout=budget.get("timeout_s", 600),
                                    max_thoughts=budget.get("max_thoughts"),
                                    gap=sc.get("gap_s", 0))
-        digest = await write_digest(run.stream, settings)
-        frame = await get_frame(run.stream.sessions, settings.ensemble)
-        async with run.stream.sessions() as s:
+        digest = await write_digest(run.score, settings)
+        key = await get_key(run.score.sessions)
+        async with run.score.sessions() as s:
             voices = {v.name: v.text for v in (await s.scalars(select(VoiceRow))).all()}
             cost = (await s.execute(select(func.count(), func.sum(LLMCall.input_tokens),
                                            func.sum(LLMCall.output_tokens))
                                     .where(LLMCall.purpose != "judge"))).one()
-        verdict = await judge(base.teacher_tier, frame=frame.text, voices=voices,
+        verdict = await judge(base.teacher_tier, key=key.text, voices=voices,
                               good=sc.get("good", ""), thoughts=thoughts,
-                              digest=digest["content"] if digest else None,
-                              person_label=frame.person_label)
+                              digest=digest["content"] if digest else None)
         return {
-            "scenario": name, "ensemble": sc["ensemble"], "ended": how,
+            "scenario": name, "ended": how,
             "seconds": round(time.monotonic() - start, 1),
             "thoughts": len(thoughts),
             "voice_thoughts": sum(t["kind"] == "voice" for t in thoughts),

@@ -10,7 +10,7 @@ COPY pyproject.toml README.md ./
 COPY polyphony ./polyphony
 RUN pip install . && uv tool install mcp-server-fetch
 
-COPY ensembles ./ensembles
+COPY mind ./mind
 COPY static ./static
 COPY scripts ./scripts
 COPY simulate ./simulate

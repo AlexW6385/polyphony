@@ -1,4 +1,3 @@
-ensemble: mind
 seed:
   - "Should I take the AI specialization next term, or keep my electives free?"
 budget: {timeout_s: 600, max_thoughts: 60, idle_s: 30}

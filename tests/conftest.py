@@ -16,7 +16,7 @@ import redis.asyncio as aioredis
 from polyphony import llm
 from polyphony.config import Settings
 from polyphony.db import Base, make_engine, make_sessionmaker
-from polyphony.stream import Stream
+from polyphony.score import Score
 
 DB_URL = os.environ.get("TEST_DATABASE_URL",
                         "postgresql+asyncpg://postgres@localhost:5432/polyphony_test")
@@ -55,15 +55,15 @@ def settings(tmp_path):
         database_url=DB_URL, redis_url=REDIS_URL,
         listen_provider="fake", listen_model="fake-listen",
         speak_provider="fake", speak_model="fake-speak",
-        ensembles_dir=tmp_path / "ensembles", namespace="ptest",
-        embed_provider="", teacher_sample_rate=0.0,
-        run_senses=False, run_memory=False, run_digest=False, run_waker=False,
+        mind_dir=tmp_path / "mind", namespace="ptest",
+        teacher_sample_rate=0.0,
+        run_senses=False, run_digest=False,
         _env_file=None,
     )
 
 
 @pytest.fixture
-async def stream(settings):
+async def score(settings):
     engine = make_engine(DB_URL)
     try:
         async with engine.begin() as conn:
@@ -78,7 +78,7 @@ async def stream(settings):
     except Exception as e:  # pragma: no cover
         await engine.dispose()
         pytest.skip(f"Redis not available at {REDIS_URL}: {e}")
-    s = Stream(make_sessionmaker(engine), r, window=settings.recent_window,
+    s = Score(make_sessionmaker(engine), r, window=settings.recent_window,
                namespace=settings.namespace)
     yield s
     await r.flushdb()

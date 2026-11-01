@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Watch the stream live in a terminal.
+"""Watch the score live in a terminal.
 
     python scripts/tail.py            # from now on
     python scripts/tail.py --all      # replay everything first
@@ -27,11 +27,11 @@ def show(t: dict, color: bool) -> None:
 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
-    p.add_argument("--all", action="store_true", help="replay the whole stream first")
+    p.add_argument("--all", action="store_true", help="replay the whole score first")
     p.add_argument("--url", default=os.environ.get("POLYPHONY_URL", "http://localhost:8000"))
     a = p.parse_args()
     color = sys.stdout.isatty()
-    url = a.url.rstrip("/") + "/stream" + ("?after=0" if a.all else "")
+    url = a.url.rstrip("/") + "/score" + ("?after=0" if a.all else "")
     try:
         with urllib.request.urlopen(url) as r:
             for raw in r:

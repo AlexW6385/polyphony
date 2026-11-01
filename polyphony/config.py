@@ -5,14 +5,14 @@ from __future__ import annotations
 from functools import lru_cache
 from pathlib import Path
 
-from pydantic import BaseModel
+from pydantic import BaseModel, PrivateAttr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
 class TierConfig(BaseModel):
-    """Which provider/model a tier (listen, speak, sense, teacher, embed) talks to."""
+    """Which provider/model a tier (listen, speak, sense, teacher) talks to."""
 
     provider: str
     model: str
@@ -22,23 +22,24 @@ class TierConfig(BaseModel):
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    # The values read from .env, kept by runtime_config before the settings page overrides them.
+    _env_values: Settings | None = PrivateAttr(default=None)
 
     database_url: str = "postgresql+asyncpg://polyphony:polyphony@localhost:5432/polyphony"
     redis_url: str = "redis://localhost:6379/0"
     namespace: str = "polyphony"  # prefix of every Redis key; isolates evals/simulator runs
 
-    # Which ensemble (frame + voices + senses) this instance runs.
-    ensemble: str = "mind"
-    ensembles_dir: Path = ROOT / "ensembles"
+    # The key, voices and senses the database is seeded from on first start.
+    mind_dir: Path = ROOT / "mind"
 
     # listen: hot path, local small model by default (the "student").
-    listen_provider: str = "ollama"
-    listen_model: str = "qwen2.5:3b"
+    listen_provider: str = "anthropic"
+    listen_model: str = "claude-haiku-5-5"
     listen_base_url: str = ""
     listen_api_key: str = ""
 
     speak_provider: str = "anthropic"
-    speak_model: str = "claude-sonnet-4-5"
+    speak_model: str = "claude-sonnet-5-5"
     speak_base_url: str = ""
     speak_api_key: str = ""
 
@@ -57,20 +58,8 @@ class Settings(BaseSettings):
     # Simulator: record every listen as a sample with this source (e.g. "synthetic").
     record_all_listens: str = ""
 
-    # Embeddings for memory. Empty provider = memory off.
-    embed_provider: str = "ollama"
-    embed_model: str = "nomic-embed-text"
-    embed_base_url: str = ""
-    embed_api_key: str = ""
-    embed_dim: int = 768
-    memory_k: int = 5
-    memory_query_last: int = 3
-
     # Digest: quiet this long (no new thought, nobody forming) -> write a digest.
     digest_idle_seconds: float = 90.0
-
-    # Quiet this long -> wake one voice at random, once per quiet stretch. 0 = off.
-    idle_wake_seconds: float = 20.0
 
     # Senses over MCP.
     mcp_fetch_command: str = "uvx mcp-server-fetch"
@@ -92,35 +81,28 @@ class Settings(BaseSettings):
     pause_scale: float = 1.0  # simulator: shrink voices' pause_seconds to run faster
     recent_window: int = 40
     strays: int = 4
-    enabled_voices: str = ""  # comma-separated; empty = every enabled voice in the DB
     host: str = "127.0.0.1"  # compose sets 0.0.0.0 inside the container, published on 127.0.0.1
     port: int = 8000
 
     # Background components (tests and the simulator switch some off).
     run_senses: bool = True
-    run_memory: bool = True
     run_digest: bool = True
-    run_waker: bool = True
 
     static_dir: Path = ROOT / "static"
 
     # ------------------------------------------------------------------ paths
 
     @property
-    def ensemble_dir(self) -> Path:
-        return self.ensembles_dir / self.ensemble
-
-    @property
     def voices_dir(self) -> Path:
-        return self.ensemble_dir / "voices"
+        return self.mind_dir / "voices"
 
     @property
     def senses_file(self) -> Path:
-        return self.ensemble_dir / "senses.yaml"
+        return self.mind_dir / "senses.yaml"
 
     @property
-    def frame_file(self) -> Path:
-        return self.ensemble_dir / "frame.md"
+    def key_file(self) -> Path:
+        return self.mind_dir / "key.md"
 
     # ------------------------------------------------------------------ tiers
 
@@ -151,15 +133,6 @@ class Settings(BaseSettings):
     @property
     def teacher_tier(self) -> TierConfig:
         return self._tier("teacher", self.speak_tier)
-
-    @property
-    def embed_tier(self) -> TierConfig | None:
-        return self._tier("embed") if self.embed_provider else None
-
-    @property
-    def voice_allowlist(self) -> set[str] | None:
-        names = {n.strip() for n in self.enabled_voices.split(",") if n.strip()}
-        return names or None
 
 
 @lru_cache

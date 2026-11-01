@@ -1,5 +1,7 @@
 """Pure-function tests: JSON extraction, tier resolution, voice parsing, cadence math."""
 
+import json
+
 import pytest
 
 from polyphony import prompts
@@ -112,26 +114,26 @@ def test_fingerprints_match_on_url_or_title():
 
 def test_render_marks_self_and_kinds():
     recent = [
-        {"seq": 1, "author": "person", "kind": "person", "content": "hi", "mood": None},
+        {"seq": 1, "author": "conscious", "kind": "theme", "content": "hi", "mood": None},
         {"seq": 2, "author": "rest", "kind": "voice", "content": "tired", "mood": "flat"},
     ]
     listens = {"rest": {"speak": False, "mood": "tired", "reason": "third loop", "trigger_seq": 2}}
-    out = prompts.render(recent, [], listens, ["make"], "rest", person_label="conscious")
-    assert "[1] [conscious] conscious: hi" in out
+    out = prompts.render(recent, [], listens, ["make"], "rest")
+    assert "[1] [theme] conscious: hi" in out
     assert "[2] rest (you) (flat): tired" in out
-    assert "rest (you): quiet — tired (at [2])" in out
+    assert "rest (you): rest — tired (at [2])" in out
     assert "third loop" not in out
     assert "make" in out.split("## Forming a thought right now")[1]
 
 
 def test_prompt_prefix_is_shared_across_voices():
-    from polyphony.frame import Frame
+    from polyphony.key import Key
 
-    f = Frame("mind", "mind", "conscious", "A frame.")
+    f = Key(text="A key.")
     a = prompts.listen_system(f, "rest", "**Wants** — rest.")
     b = prompts.listen_system(f, "make", "**Wants** — ship.")
     prefix = a[: a.index('Your name is')]
-    assert b.startswith(prefix) and "A frame." in prefix and "only listening" in prefix
+    assert b.startswith(prefix) and "A key." in prefix and "only listening" in prefix
 
 
 def test_engine_text_is_framing_neutral():
@@ -178,25 +180,33 @@ def test_render_shows_how_long_ago():
     assert "[2, 30 seconds ago] doubt: new" in out
 
 
-async def test_waker_wakes_one_voice_once_per_quiet_stretch(monkeypatch):
-    from types import SimpleNamespace
+def test_runtime_config_overrides_env_and_restores_it(settings):
+    from polyphony import runtime_config as rc
 
-    from polyphony import waker as waker_mod
+    env_speak = (settings.speak_provider, settings.speak_model)
+    data = rc.merge({}, {"provider": "anthropic", "api_key": " sk-test-1234 ",
+                         "listen_model": "claude-haiku-5-5", "speak_model": "claude-sonnet-5-5"})
+    rc.apply(settings, data)
+    assert (settings.listen_tier.provider, settings.listen_tier.model) == ("anthropic", "claude-haiku-5-5")
+    assert settings.speak_tier.api_key == settings.listen_tier.api_key == "sk-test-1234"
+    assert settings.teacher_tier.model == "claude-sonnet-5-5"  # teacher and sense follow speak
+    assert settings.sense_tier.provider == "anthropic"
+    view = rc.view(settings, data)
+    assert view["api_key"] == {"set": True, "source": "page", "hint": "…1234"}
+    assert "sk-test-1234" not in json.dumps(view)
+    # switching provider drops the old vendor's key
+    assert "api_key" not in rc.merge(data, {"provider": "deepseek"})
+    rc.apply(settings, {})
+    assert (settings.speak_provider, settings.speak_model) == env_speak
 
-    quiet = {"q": (30.0, 5)}
 
-    async def fake_quiet_for(stream):
-        return quiet["q"]
+@pytest.mark.parametrize("patch", [
+    {"provider": "nope", "listen_model": "a", "speak_model": "b"},
+    {"listen_model": "a", "speak_model": "b"},
+    {"provider": "anthropic", "listen_model": "a"},
+])
+def test_runtime_config_rejects_bad_edits(patch):
+    from polyphony import runtime_config as rc
 
-    monkeypatch.setattr(waker_mod, "quiet_for", fake_quiet_for)
-    nudged = []
-    voices = {n: SimpleNamespace(nudge=lambda n=n: nudged.append(n)) for n in ("a", "b")}
-    w = waker_mod.Waker(None, SimpleNamespace(idle_wake_seconds=20.0), lambda: voices)
-
-    assert await w.tick() in voices
-    assert await w.tick() is None  # same quiet stretch: no second wake
-    quiet["q"] = (5.0, 6)
-    assert await w.tick() is None  # not quiet long enough
-    quiet["q"] = (25.0, 6)
-    assert await w.tick() in voices
-    assert len(nudged) == 2
+    with pytest.raises(ValueError):
+        rc.merge({}, patch)

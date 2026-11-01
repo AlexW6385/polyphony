@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Polyphony settings</title>
+<style>
+  :root {
+    --bg: #f6f4ef; --panel: #fffdf8; --ink: #22201c; --muted: #7a756b; --line: #e3ddd0;
+    --accent: #3b5bdb; --cadence: #862e9c;
+    --series-1: #2a78d6; --good: #0ca30c; --critical: #d03b3b;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #16161a; --panel: #1e1e23; --ink: #e9e6df; --muted: #8e8a82; --line: #2e2e35;
+            --accent: #748ffc; --cadence: #da77f2; --series-1: #3987e5; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 var(--sans); }
+  header { padding: 14px 20px; border-bottom: 1px solid var(--line); display: flex;
+           align-items: baseline; gap: 12px; flex-wrap: wrap; }
+  header h1 { margin: 0; font-size: 18px; letter-spacing: .02em; }
+  header a { color: var(--muted); font-size: 13px; }
+  header .right { margin-left: auto; display: flex; gap: 10px; align-items: baseline; }
+  #pause.paused { border-color: var(--cadence); color: var(--cadence); }
+  main { max-width: 900px; margin: 0 auto; padding: 8px 16px 60px; }
+  h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .1em; color: var(--muted);
+       margin: 28px 0 8px; display: flex; align-items: center; gap: 10px; }
+  .card { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 14px 16px; }
+  .hint { font-size: 12px; color: var(--muted); }
+  input, select { font: inherit; color: inherit; background: var(--bg); border: 1px solid var(--line);
+                  border-radius: 6px; padding: 6px 9px; min-width: 0; width: 100%; }
+  h2 select { width: auto; font-size: 12px; padding: 2px 6px; text-transform: none; letter-spacing: 0; }
+  button { font: inherit; border: 1px solid var(--line); background: var(--panel); color: inherit;
+           border-radius: 6px; padding: 5px 12px; cursor: pointer; white-space: nowrap; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: white; }
+  .mono { font-family: var(--mono); font-size: 12px; }
+  .muted { color: var(--muted); }
+  .form { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 10px 14px; align-items: center; }
+  .form label { color: var(--muted); font-size: 13px; }
+  .form .field .hint { margin-top: 3px; }
+  .actions { display: flex; gap: 8px; align-items: center; margin-top: 14px; flex-wrap: wrap; }
+  .result { font-size: 12px; }
+  .result.ok::before { content: "✓ "; color: var(--good); }
+  .result.bad { color: var(--critical); }
+  .result.bad::before { content: "⚠ "; }
+
+  /* monitoring */
+  .kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; }
+  .kpi { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 10px 12px; }
+  .kpi .label { font-size: 12px; color: var(--muted); }
+  .kpi .value { font-size: 24px; font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1.2; }
+  .kpi .sub { font-size: 12px; color: var(--muted); }
+  .kpi.alert { border-color: var(--critical); }
+  .kpi.alert .status { color: var(--critical); font-weight: 600; }
+  .charts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
+  .chart { border: 1px solid var(--line); border-radius: 8px; background: var(--panel); padding: 12px 14px; }
+  .chart.wide { grid-column: 1 / -1; }
+  .chart h3 { margin: 0 0 8px; font-size: 13px; font-weight: 600; }
+  .chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+  .chart .grid { stroke: var(--line); stroke-width: 1; }
+  .chart .axis { fill: var(--muted); font-size: 11px; font-family: var(--sans); }
+  .chart .bar { fill: var(--series-1); }
+  .chart .hit { fill: transparent; cursor: default; }
+  .chart .hit:hover + .bar, .chart .hover { opacity: .75; }
+  .hbars { display: grid; grid-template-columns: max-content minmax(0, 1fr) max-content; gap: 6px 10px;
+           align-items: center; font-size: 13px; }
+  .hbars .track { height: 14px; position: relative; }
+  .hbars .fill { position: absolute; inset: 0 auto 0 0; background: var(--series-1);
+                 border-radius: 0 4px 4px 0; min-width: 2px; }
+  .hbars .val { font-variant-numeric: tabular-nums; color: var(--muted); font-size: 12px; text-align: right; }
+  .hbars .row { display: contents; }
+  .empty { color: var(--muted); font-size: 13px; padding: 12px 0; }
+  table { border-collapse: collapse; width: 100%; font-size: 12px; margin-top: 8px; }
+  th { text-align: left; font-weight: 500; color: var(--muted); }
+  th, td { padding: 5px 6px; border-bottom: 1px solid var(--line); }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; }
+  details summary { cursor: pointer; color: var(--muted); font-size: 12px; margin-top: 10px; }
+  .errors { list-style: none; margin: 0; padding: 0; font-size: 12px; }
+  .errors li { padding: 6px 0; border-bottom: 1px solid var(--line); }
+  .errors li:last-child { border-bottom: 0; }
+  .errors .where { color: var(--critical); font-weight: 600; }
+  #tip { position: fixed; pointer-events: none; background: var(--panel); border: 1px solid var(--line);
+         border-radius: 6px; padding: 6px 8px; font-size: 12px; box-shadow: 0 2px 8px rgba(0,0,0,.12);
+         display: none; z-index: 10; white-space: nowrap; }
+  @media (max-width: 640px) {
+    .form { grid-template-columns: 1fr; gap: 4px; }
+    .form label { margin-top: 8px; }
+    .charts { grid-template-columns: 1fr; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Settings</h1>
+  <a href="/">← back to the room</a>
+  <div class="right"><span id="run-state" class="muted"></span><button id="pause">Stop all</button></div>
+</header>
+<main>
+  <h2>Model</h2>
+  <div class="card">
+    <div class="form">
+      <label for="provider">Provider</label>
+      <div class="field"><select id="provider"></select></div>
+      <label for="key">API key</label>
+      <div class="field"><input id="key" type="password" autocomplete="off">
+        <div class="hint" id="key-state"></div></div>
+      <label for="listen-model">Listen model</label>
+      <div class="field"><input id="listen-model" list="models" class="mono">
+        <div class="hint">Decides whether a voice speaks. Runs on every new thought, once per voice, so keep it cheap and fast.</div>
+        <div class="result" id="listen-result"></div></div>
+      <label for="speak-model">Speak model</label>
+      <div class="field"><input id="speak-model" list="models" class="mono">
+        <div class="hint">Writes what a voice says, the votes and the digest.</div>
+        <div class="result" id="speak-result"></div></div>
+    </div>
+    <datalist id="models"></datalist>
+    <div class="actions">
+      <button id="save" class="primary">Save</button>
+      <button id="test">Test both</button>
+      <span class="hint" id="saved-state"></span>
+    </div>
+  </div>
+
+  <h2>Monitoring <select id="hours">
+      <option value="1">last hour</option><option value="24" selected>last 24 hours</option>
+      <option value="168">last 7 days</option></select></h2>
+  <div class="kpis" id="kpis"></div>
+  <div class="charts">
+    <div class="chart wide"><h3>Model calls over time</h3><div id="timeline"></div></div>
+    <div class="chart"><h3>Calls by purpose</h3><div id="purposes"></div></div>
+    <div class="chart"><h3>Tokens by model</h3><div id="tokens"></div>
+      <details><summary>Show as table</summary><table id="tiers-table"></table></details></div>
+    <div class="chart wide" id="errors-box" hidden><h3 style="color:var(--critical)">⚠ Recent errors</h3>
+      <ul class="errors" id="errors"></ul></div>
+  </div>
+</main>
+<div id="tip" role="tooltip"></div>
+<script>
+const $ = (s) => document.querySelector(s);
+const api = async (method, path, body) => {
+  const r = await fetch(path, { method, headers: {"Content-Type": "application/json"},
+                                body: body ? JSON.stringify(body) : undefined });
+  if (!r.ok) { const t = await r.text(); alert(`${method} ${path}: ${t}`); throw new Error(t); }
+  return r.json();
+};
+const fmt = (x) => (x ?? 0).toLocaleString();
+const short = (x) => x >= 1e6 ? (x / 1e6).toFixed(1) + "M" : x >= 1e4 ? Math.round(x / 1e3) + "k" : fmt(x);
+function el(tag, attrs = {}, text) {
+  const ns = ["svg", "rect", "line", "text", "path", "g"].includes(tag) ? "http://www.w3.org/2000/svg" : null;
+  const e = ns ? document.createElementNS(ns, tag) : document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v);
+  if (text != null) e.textContent = text;
+  return e;
+}
+
+// ---------------------------------------------------------------- tooltip
+const tip = $("#tip");
+function showTip(ev, lines) {
+  tip.replaceChildren(...lines.map((l, i) => el("div", i ? {} : {style: "font-weight:600"}, l)));
+  tip.style.display = "block";
+  const x = Math.min(ev.clientX + 12, window.innerWidth - tip.offsetWidth - 8);
+  tip.style.left = `${x}px`; tip.style.top = `${ev.clientY + 14}px`;
+}
+const hideTip = () => { tip.style.display = "none"; };
+
+// ---------------------------------------------------------------- model settings
+let cfg = null;
+function renderConfig() {
+  $("#provider").replaceChildren(...cfg.providers.map(p =>
+    el("option", p === cfg.provider ? {value: p, selected: ""} : {value: p}, p)));
+  $("#listen-model").value = cfg.listen_model;
+  $("#speak-model").value = cfg.speak_model;
+  $("#key").value = "";
+  showKeyState();
+  fillModels();
+  $("#saved-state").textContent = cfg.saved ? "" : "Currently using the values from .env.";
+}
+function showKeyState() {
+  const k = cfg.api_key; const same = $("#provider").value === cfg.provider;
+  $("#key").placeholder = k.set && same ? "paste a new key to replace it" : "paste your API key";
+  $("#key-state").textContent = !same ? "A key is needed for the new provider."
+    : k.set ? `Key set (${k.hint}, ${k.source === "page" ? "saved here" : "from .env"}). Stored in the local database, never shown again, never in git.`
+    : "No key yet.";
+}
+function fillModels() {
+  const names = cfg.suggestions[$("#provider").value] || [];
+  $("#models").replaceChildren(...names.map(n => el("option", {value: n})));
+}
+$("#provider").addEventListener("change", () => { showKeyState(); fillModels(); });
+$("#save").addEventListener("click", async () => {
+  const body = {provider: $("#provider").value, listen_model: $("#listen-model").value.trim(),
+                speak_model: $("#speak-model").value.trim()};
+  const key = $("#key").value.trim();
+  if (key) body.api_key = key;
+  cfg = await api("PUT", "/config", body);
+  renderConfig();
+  $("#saved-state").textContent = "Saved. Voices restart on the new models.";
+});
+$("#test").addEventListener("click", async () => {
+  for (const tier of ["listen", "speak"]) {
+    const out = $(`#${tier}-result`); out.className = "result"; out.textContent = "testing…";
+    const r = await api("POST", `/config/test/${tier}`);
+    out.className = `result ${r.ok ? "ok" : "bad"}`;
+    out.textContent = r.ok ? `${r.model} answered in ${fmt(r.ms)} ms` : `${r.model}: ${r.error}`;
+  }
+});
+
+// ---------------------------------------------------------------- run state
+let paused = false;
+async function refreshPause() {
+  try { paused = (await api("GET", "/pause")).paused; } catch { return; }
+  $("#pause").textContent = paused ? "Resume" : "Stop all";
+  $("#pause").classList.toggle("paused", paused);
+  $("#run-state").textContent = paused ? "everything is stopped" : "running";
+}
+$("#pause").addEventListener("click", async () => { await api("POST", paused ? "/resume" : "/pause"); refreshPause(); });
+
+// ---------------------------------------------------------------- monitoring
+function kpi(label, value, sub, alert) {
+  const box = el("div", {class: alert ? "kpi alert" : "kpi"});
+  box.append(el("div", {class: "label"}, label), el("div", {class: "value"}, value));
+  if (sub) box.append(el("div", {class: alert ? "sub status" : "sub"}, sub));
+  return box;
+}
+function renderKpis(s) {
+  const sum = (f) => s.tiers.reduce((a, t) => a + f(t), 0);
+  const calls = sum(t => t.calls), errors = sum(t => t.errors);
+  const tokens = sum(t => t.input_tokens + t.output_tokens), cached = sum(t => t.cached_input_tokens);
+  const p95 = (tier) => { const t = s.tiers.filter(x => x.tier === tier); return t.length ? Math.max(...t.map(x => x.latency_ms_p95)) : null; };
+  const lp = p95("listen"), sp = p95("speak");
+  $("#kpis").replaceChildren(
+    kpi("Model calls", fmt(calls)),
+    kpi("Tokens", short(tokens), cached ? `${short(cached)} from cache` : ""),
+    kpi("Errors", fmt(errors), errors ? "⚠ see below" : "✓ none", errors > 0),
+    kpi("Listen p95", lp == null ? "–" : `${(lp / 1000).toFixed(1)} s`, "time to decide"),
+    kpi("Speak p95", sp == null ? "–" : `${(sp / 1000).toFixed(1)} s`, "time to write"),
+  );
+}
+function renderTimeline(s) {
+  const box = $("#timeline");
+  const {unit, since, points} = s.timeline;
+  const step = {minute: 6e4, hour: 36e5, day: 864e5}[unit];
+  const start = Math.floor(new Date(since).getTime() / step) * step;
+  const end = Math.floor(Date.now() / step) * step;
+  const byT = new Map(points.map(p => [Math.floor(new Date(p.t).getTime() / step) * step, p]));
+  const buckets = [];
+  for (let t = start; t <= end; t += step) buckets.push({t, ...(byT.get(t) || {calls: 0, errors: 0})});
+  if (!points.length) { box.replaceChildren(el("div", {class: "empty"}, "No model calls in this window.")); return; }
+  const W = 840, H = 160, L = 34, B = 20, T = 6;
+  const max = Math.max(...buckets.map(b => b.calls), 1);
+  const nice = Math.pow(10, Math.floor(Math.log10(max))) * (max / Math.pow(10, Math.floor(Math.log10(max))) > 5 ? 10 : max / Math.pow(10, Math.floor(Math.log10(max))) > 2 ? 5 : 2);
+  const top = Math.ceil(max / nice) * nice;
+  const y = (v) => T + (H - T - B) * (1 - v / top);
+  const slot = (W - L) / buckets.length, bw = Math.max(1, Math.min(24, slot - 2));
+  const svg = el("svg", {viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "Model calls over time"});
+  for (const v of [0, top / 2, top]) {
+    svg.append(el("line", {x1: L, x2: W, y1: y(v), y2: y(v), class: "grid"}));
+    svg.append(el("text", {x: L - 6, y: y(v) + 4, "text-anchor": "end", class: "axis"}, short(v)));
+  }
+  const label = (t) => { const d = new Date(t);
+    return unit === "day" ? d.toLocaleDateString([], {month: "short", day: "numeric"})
+                          : d.toLocaleTimeString([], {hour: "2-digit", minute: "2-digit"}); };
+  const every = Math.ceil(buckets.length / 6);
+  buckets.forEach((b, i) => {
+    const x = L + i * slot + (slot - bw) / 2;
+    if (b.calls) {
+      const h = H - B - y(b.calls), r = Math.min(4, bw / 2, h);
+      const yb = H - B, yt = y(b.calls);
+      svg.append(el("path", {class: "bar", d: `M${x},${yb}V${yt + r}Q${x},${yt} ${x + r},${yt}H${x + bw - r}Q${x + bw},${yt} ${x + bw},${yt + r}V${yb}Z`}));
+    }
+    if (i % every === 0) svg.append(el("text", {x: L + i * slot + slot / 2, y: H - 4, "text-anchor": "middle", class: "axis"}, label(b.t)));
+    const hit = el("rect", {x: L + i * slot, y: T, width: slot, height: H - T - B, class: "hit"});
+    hit.addEventListener("pointermove", (ev) => showTip(ev, [label(b.t), `${fmt(b.calls)} calls`, b.errors ? `⚠ ${fmt(b.errors)} errors` : "no errors"]));
+    hit.addEventListener("pointerleave", hideTip);
+    svg.append(hit);
+  });
+  box.replaceChildren(svg);
+}
+function renderHbars(box, rows, unitLabel) {
+  if (!rows.length) { box.replaceChildren(el("div", {class: "empty"}, "Nothing yet.")); return; }
+  const max = Math.max(...rows.map(r => r.value), 1);
+  const grid = el("div", {class: "hbars"});
+  for (const r of rows) {
+    const name = el("div", {}, r.label);
+    const track = el("div", {class: "track"});
+    const fill = el("div", {class: "fill"}); fill.style.width = `${(100 * r.value / max).toFixed(1)}%`;
+    track.append(fill);
+    const val = el("div", {class: "val"}, short(r.value));
+    for (const node of [name, track, val]) {
+      node.addEventListener("pointermove", (ev) => showTip(ev, [r.label, `${fmt(r.value)} ${unitLabel}`, ...(r.extra || [])]));
+      node.addEventListener("pointerleave", hideTip);
+    }
+    grid.append(name, track, val);
+  }
+  box.replaceChildren(grid);
+}
+const PURPOSE = {listen: "listen (should I speak?)", speak: "speak", shadow: "teacher check",
+                 proposal: "vote: worth deciding?", standing: "vote: weights", vote: "vote: ballot",
+                 digest: "digest", triage: "news: pick", summarize: "news: summarise", test: "settings test"};
+function renderStats(s) {
+  renderKpis(s); renderTimeline(s);
+  renderHbars($("#purposes"), s.by_purpose.map(p => ({label: PURPOSE[p.purpose] || p.purpose, value: p.calls,
+    extra: [`${fmt(p.tokens)} tokens`, ...(p.errors ? [`⚠ ${fmt(p.errors)} errors`] : [])]})), "calls");
+  const byModel = {};
+  for (const t of s.tiers) {
+    const k = t.model; byModel[k] = byModel[k] || {value: 0, extra: new Set()};
+    byModel[k].value += t.input_tokens + t.output_tokens; byModel[k].extra.add(t.tier);
+  }
+  renderHbars($("#tokens"), Object.entries(byModel).sort((a, b) => b[1].value - a[1].value)
+    .map(([m, v]) => ({label: m, value: v.value, extra: [`used for: ${[...v.extra].join(", ")}`]})), "tokens");
+  const head = el("tr"); for (const h of ["tier", "model", "calls", "errors", "input", "output", "p95"]) head.append(el("th", {class: ["calls","errors","input","output","p95"].includes(h) ? "num" : ""}, h));
+  $("#tiers-table").replaceChildren(head, ...s.tiers.map(t => { const tr = el("tr");
+    for (const [v, num] of [[t.tier], [t.model], [fmt(t.calls), 1], [fmt(t.errors), 1], [fmt(t.input_tokens), 1], [fmt(t.output_tokens), 1], [`${fmt(t.latency_ms_p95)} ms`, 1]])
+      tr.append(el("td", num ? {class: "num"} : {}, v));
+    return tr; }));
+  $("#errors-box").hidden = !s.recent_errors.length;
+  $("#errors").replaceChildren(...s.recent_errors.map(e => { const li = el("li");
+    li.append(el("span", {class: "where"}, `${e.purpose}${e.voice ? " · " + e.voice : ""}`),
+              el("span", {class: "muted"}, ` · ${e.at ? new Date(e.at).toLocaleString() : ""} · ${e.model}`),
+              el("div", {class: "mono"}, e.error));
+    return li; }));
+}
+async function refreshStats() {
+  try { renderStats(await api("GET", `/stats?hours=${$("#hours").value}`)); } catch {}
+}
+$("#hours").addEventListener("change", refreshStats);
+
+(async () => {
+  cfg = await api("GET", "/config");
+  renderConfig(); refreshPause(); refreshStats();
+  setInterval(refreshStats, 15000);
+  setInterval(refreshPause, 5000);
+})();
+</script>
+</body>
+</html>

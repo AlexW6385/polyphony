@@ -156,22 +156,28 @@ class SenseLog(Base):
     fetched_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
-class FrameRow(Base):
-    """What this polyphony is. One row per ensemble; the running one is used."""
+class KeyRow(Base):
+    """What this mind is (the key). A single row."""
 
-    __tablename__ = "frames"
+    __tablename__ = "keys"
 
-    name: Mapped[str] = mapped_column(String(64), primary_key=True)
-    label: Mapped[str] = mapped_column(Text)
-    person_label: Mapped[str] = mapped_column(Text)
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
     text: Mapped[str] = mapped_column(Text)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
-    def to_dict(self) -> dict[str, Any]:
-        return {"name": self.name, "label": self.label, "person_label": self.person_label,
-                "text": self.text}
+
+class AppSetting(Base):
+    """Settings saved from the settings page; they override `.env` (see runtime_config)."""
+
+    __tablename__ = "app_settings"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[Any] = mapped_column(JSONB)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
 
 
 class LLMCall(Base):
@@ -208,7 +214,6 @@ class ListenSample(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     listen_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     source: Mapped[str] = mapped_column(String(16))
-    ensemble: Mapped[str] = mapped_column(String(64))
     voice: Mapped[str] = mapped_column(String(64))
     system: Mapped[str] = mapped_column(Text)
     prompt: Mapped[str] = mapped_column(Text)
@@ -229,7 +234,7 @@ def make_sessionmaker(engine: AsyncEngine) -> async_sessionmaker:
     return async_sessionmaker(engine, expire_on_commit=False)
 
 
-async def init_db(engine: AsyncEngine, attempts: int = 30, embed_dim: int = 768) -> None:
+async def init_db(engine: AsyncEngine, attempts: int = 30) -> None:
     """Create tables, then run migrations. Retries so `docker compose up` needs no ordering."""
     from .migrations import run_migrations
 
@@ -237,7 +242,7 @@ async def init_db(engine: AsyncEngine, attempts: int = 30, embed_dim: int = 768)
         try:
             async with engine.begin() as conn:
                 await conn.run_sync(Base.metadata.create_all)
-            await run_migrations(engine, embed_dim=embed_dim)
+            await run_migrations(engine)
             return
         except (OSError, ConnectionError) as e:  # DB not up yet
             log.info("waiting for database (%s/%s): %s", i + 1, attempts, e)
