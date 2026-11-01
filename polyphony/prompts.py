@@ -79,13 +79,7 @@ have something only you would say.
 
 Reply with one JSON object and nothing else:
 {{"speak": true|false, "mood": "one or two words", "reason": "one short sentence",
- "pause_seconds": seconds to wait before speaking (0-60), "propose_cadence": null}}
-
-propose_cadence stays null, or holds the full text of a resolution you want everyone to vote on
-now. Propose one when the question has been taken as far as talk can take it and what is left is
-going round in circles: a vote settles it and lets the room rest. If a proposal was just turned
-down as not worth deciding now, keep talking instead of proposing again. If a vote failed only
-on its wording, propose the corrected resolution."""
+ "pause_seconds": seconds to wait before speaking (0-60)}}"""
 
 LISTEN_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -94,9 +88,8 @@ LISTEN_SCHEMA: dict[str, Any] = {
         "mood": {"type": "string"},
         "reason": {"type": "string"},
         "pause_seconds": {"type": "number"},
-        "propose_cadence": {"type": ["string", "null"]},
     },
-    "required": ["speak", "mood", "reason", "pause_seconds", "propose_cadence"],
+    "required": ["speak", "mood", "reason", "pause_seconds"],
 }
 
 # --------------------------------------------------------------------------- speak
@@ -213,33 +206,26 @@ def render(
 CADENCE_ENGINE = f"""\
 {_ENGINE_COMMON}
 
-A cadence is a formal decision procedure: a resolution is posed, the voices weigh each other,
-vote, and the result is recorded in the score. What a cadence means is up to the key."""
+A cadence is a vote: the clerk has put a question and its options to all voices. The voices
+first weigh each other for this question, then each says which options it supports. The result
+is recorded in the score. What a cadence means is up to the key."""
 
 
-def proposal_system(key: Key, proposer: str, resolution: str) -> str:
+def _letters(options: list[str]) -> str:
+    return "\n".join(f"{chr(65 + i)}. {o}" for i, o in enumerate(options))
+
+
+def standing_system(key: Key, question: str, options: list[str], voices: list[str]) -> str:
     details = f"""\
-Another voice ({proposer}) has proposed holding a cadence on this resolution:
+The question put to the vote:
 
-  "{resolution}"
+  {question}
 
-Before any vote happens, every voice answers a simpler question: is this worth deciding now?
-(Not: do you agree with it.)
-
-Reply with one JSON object and nothing else:
-{{"yes": true|false, "reason": "one line"}}"""
-    return _compose(key, CADENCE_ENGINE, details)
-
-
-def standing_system(key: Key, resolution: str, voices: list[str]) -> str:
-    details = f"""\
-A cadence is running on this resolution:
-
-  "{resolution}"
+{_letters(options)}
 
 First round: standing. For EVERY voice listed below, including yourself, propose a weight from 0
-to 1 for how much its vote should count on THIS question — by expertise, or by how much it has
-at stake. Be fair, not self-serving; it is fine to give yourself a low weight.
+to 1 for how much its vote should count on THIS question, by expertise or by how much it has at
+stake. Be fair, not self-serving; it is fine to give yourself a low weight.
 
 Voices: {", ".join(voices)}
 
@@ -249,22 +235,55 @@ why:
     return _compose(key, CADENCE_ENGINE, details)
 
 
-def vote_system(key: Key, resolution: str, weights: dict[str, float]) -> str:
+def vote_system(key: Key, question: str, options: list[str], weights: dict[str, float]) -> str:
     w = "\n".join(f"- {v}: {x:.2f}" for v, x in weights.items())
     details = f"""\
-A cadence is running on this resolution:
+The question put to the vote:
 
-  "{resolution}"
+  {question}
+
+{_letters(options)}
 
 The voices have agreed on these weights for this question:
 {w}
 
-Second round: vote. Read the discussion and vote for, against, or abstain, with a one-line
-reason in your own voice.
+Second round: vote. Say which options you support, by letter: one, several, or none. Give a
+one-line reason in your own voice.
 
 Reply with one JSON object and nothing else:
-{{"vote": "for" | "against" | "abstain", "reason": "one line"}}"""
+{{"support": ["A", ...], "reason": "one line"}}"""
     return _compose(key, CADENCE_ENGINE, details)
+
+
+# --------------------------------------------------------------------------- clerk
+
+CLERK_ENGINE = """\
+You are the clerk: not a voice, you never take part in the discussion. You read the score and
+decide whether it is time to settle something by a vote: the theme poses a real choice and the
+voices have said enough about it to decide, or the talk is going round in circles. If so, state
+the question and two to four options drawn from what the voices proposed, short and concrete,
+as distinct from each other as the discussion allows (two options can be yes and no).
+
+Do not call a vote on something a [cadence] in the score has already decided, on idle talk or an
+open question with nothing to choose, or when the discussion has only just started. Write in the
+language of the score.
+
+Reply with one JSON object and nothing else:
+{"call_vote": true|false, "question": "the question to decide", "options": ["...", "..."]}"""
+
+CLERK_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "call_vote": {"type": "boolean"},
+        "question": {"type": "string"},
+        "options": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["call_vote", "question", "options"],
+}
+
+
+def clerk_system(key: Key) -> str:
+    return _compose(key, CLERK_ENGINE)
 
 
 # --------------------------------------------------------------------------- digest

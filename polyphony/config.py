@@ -81,6 +81,7 @@ class Settings(BaseSettings):
     # Background components (tests and the simulator switch some off).
     run_senses: bool = True
     run_digest: bool = True
+    run_clerk: bool = True
 
     static_dir: Path = ROOT / "static"
 

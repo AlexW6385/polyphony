@@ -27,6 +27,9 @@ off on the page); local models altogether (listen is `claude-haiku-5-5`, speak
 and the distillation notebook are gone: listen is about 6% of the cost, so a local student
 would save little). Strays (a few random older thoughts) remain.
 
+**The key is part of the mechanism.** It is copied from `mind/key.md` on every start and is
+neither shown nor editable on the page (`GET /key` only).
+
 **Settings:** one provider, one API key, a listen model and a speak model, on the settings
 page; the senses follow speak; the cadence rounds (proposal, standing, vote) run on the listen
 model; timings are fixed (digest after 90 s of quiet).
@@ -43,6 +46,16 @@ question it says where it stands and why, even if others said the same; after th
 or citing other thoughts, no repeating what was said, no repeated "I agree" (agreement goes into
 a vote); speak again only to add something that matters, and let small details go. A proposal
 just turned down is not proposed again straight away.
+
+**The clerk calls the votes.** Voices no longer propose cadences, and nothing is started by
+hand. The clerk, an edge component like the digest and not a voice, checks the discussion every
+15 new thoughts and once after 30 s of quiet that follows something new. Each check is one call
+on the speak model that answers whether a vote is due and, if so, the question and two to four
+options drawn from the discussion. The cadence weighs the voices as before, then each voice
+supports any number of the options (approval voting); an option wins with more than half of the
+weighted support and strictly ahead of the next, otherwise the question stays open. The
+yes/no "worth deciding now?" round and the confirm step are gone, as are `POST /cadence` and
+`POST /digest`.
 
 **Listen stagger.** After a new thought each voice waits a random 0 to 8 seconds before it
 listens, so the voices that listen later see what the first ones said instead of all saying

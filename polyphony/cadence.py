@@ -1,29 +1,27 @@
-"""Cadence: an explicit, optional decision procedure.
+"""Cadence: a vote on a question with two to four options, called by the clerk.
 
-    propose (by a voice) -> yes/no "worth deciding now?" among all voices, simple majority
-    start (by the conscious part, or a passed proposal):
-        round 1 standing: every voice weights every voice; averaged, normalised
-        round 2 vote:     for | against | abstain, weighted
+    round 1 standing: every voice weights every voice for this question; averaged, normalised
+    round 2 vote:     every voice says which options it supports (any number), weighted
+    -> each option's weighted support; the top one wins if it has more than half and is
+       strictly ahead of the next, otherwise the question stays open
     -> a `cadence` thought in the score with the full result
 
 The procedure itself runs as a LangGraph workflow (cadence_graph.py) with a
 checkpointer, so an interrupted cadence resumes from its last finished step.
-This module holds the API surface, the proposal vote and the pure math.
+This module holds the storage helpers and the pure math.
 """
 
 from __future__ import annotations
 
-import asyncio
 import logging
-from datetime import datetime, timezone
 from typing import Any
 
 from . import llm, prompts
 from .config import Settings
 from .db import Cadence
 from .score import Score
-from .key import Key, get_key
-from .voice import VoiceSpec, load_voice_specs
+from .key import Key
+from .voice import VoiceSpec
 
 log = logging.getLogger(__name__)
 
@@ -61,9 +59,11 @@ async def get_cadence(score: Score, cadence_id: int) -> dict[str, Any] | None:
         return row.to_dict() if row else None
 
 
-async def create_cadence(score: Score, resolution: str, proposed_by: str, status: str) -> int:
+async def create_cadence(score: Score, question: str, options: list[str], called_by: str,
+                         status: str) -> int:
     async with score.sessions() as s:
-        row = Cadence(resolution=resolution, proposed_by=proposed_by, status=status)
+        row = Cadence(resolution=question, options=options, proposed_by=called_by,
+                      status=status)
         s.add(row)
         await s.commit()
         await s.refresh(row)
@@ -101,126 +101,75 @@ def average_weights(names: list[str], proposals: list[dict[str, Any] | None]) ->
     return {n: v / total for n, v in avg.items()}
 
 
-def tally(weights: dict[str, float], votes: dict[str, dict[str, str]]) -> dict[str, Any]:
-    w_for = sum(weights.get(n, 0) for n, v in votes.items() if v["vote"] == "for")
-    w_against = sum(weights.get(n, 0) for n, v in votes.items() if v["vote"] == "against")
-    w_abstain = sum(weights.get(n, 0) for n, v in votes.items() if v["vote"] == "abstain")
-    decided = w_for + w_against
-    share = (w_for / decided) if decided > 0 else None
-    return {
-        "for": round(w_for, 4),
-        "against": round(w_against, 4),
-        "abstain": round(w_abstain, 4),
-        "share_for": round(share, 4) if share is not None else None,
-        "passed": share is not None and share > 0.5,
-    }
+def tally(weights: dict[str, float], votes: dict[str, dict[str, Any]],
+          options: list[str]) -> dict[str, Any]:
+    """Each option's weighted support among the voices that answered.
+
+    A voice may support several options (approval voting). The top option wins if its
+    support is above one half and strictly above the next; otherwise nothing is decided.
+    """
+    answered = [n for n, v in votes.items() if v.get("answered", True)]
+    total = sum(weights.get(n, 0) for n in answered)
+    shares = []
+    for i in range(len(options)):
+        w = sum(weights.get(n, 0) for n in answered if i in votes[n]["support"])
+        shares.append(round(w / total, 4) if total > 0 else 0.0)
+    order = sorted(range(len(options)), key=lambda i: -shares[i])
+    top = order[0] if order else None
+    decided = (top is not None and shares[top] > 0.5
+               and (len(order) < 2 or shares[top] > shares[order[1]]))
+    return {"shares": shares, "winner": top if decided else None, "decided": decided}
 
 
-def _normalize_vote(d: dict[str, Any] | None) -> dict[str, str]:
+def _normalize_vote(d: dict[str, Any] | None, options: list[str]) -> dict[str, Any]:
+    """`support` as option indexes; letters ("A"), numbers or the option text are accepted."""
     if not d:
-        return {"vote": "abstain", "reason": "(no answer)"}
-    v = str(d.get("vote", "abstain")).strip().lower()
-    if v not in ("for", "against", "abstain"):
-        v = "abstain"
-    return {"vote": v, "reason": str(d.get("reason") or "")}
+        return {"support": [], "reason": "(no answer)", "answered": False}
+    raw = d.get("support") or []
+    if not isinstance(raw, list):
+        raw = [raw]
+    picked: set[int] = set()
+    for x in raw:
+        t = str(x).strip()
+        if len(t) == 1 and t.upper().isalpha() and ord(t.upper()) - 65 < len(options):
+            picked.add(ord(t.upper()) - 65)
+        elif t.isdigit() and 1 <= int(t) <= len(options):
+            picked.add(int(t) - 1)
+        elif t in options:
+            picked.add(options.index(t))
+    return {"support": sorted(picked), "reason": str(d.get("reason") or ""), "answered": True}
 
 
-def summarize(resolution: str, proposed_by: str, weights: dict[str, float],
-              votes: dict[str, dict[str, str]], result: dict[str, Any]) -> str:
-    verdict = "PASSED" if result["passed"] else "DID NOT PASS"
-    share = "n/a" if result["share_for"] is None else f"{result['share_for']:.0%}"
-    lines = [
-        f'Cadence on: "{resolution}" (called by {proposed_by})',
-        f"{verdict} — weighted share for: {share}",
-        "",
-        "Weights: " + ", ".join(f"{n} {w:.2f}" for n, w in
-                                sorted(weights.items(), key=lambda kv: -kv[1])),
-        "",
-    ]
+def summarize(question: str, options: list[str], weights: dict[str, float],
+              votes: dict[str, dict[str, Any]], result: dict[str, Any]) -> str:
+    letter = lambda i: chr(65 + i)
+    if result["decided"]:
+        w = result["winner"]
+        verdict = f"DECIDED: {letter(w)}. {options[w]} ({result['shares'][w]:.0%})"
+    else:
+        verdict = "UNDECIDED: no option had more than half"
+    lines = [f"Cadence on: {question}", verdict, ""]
+    lines += [f"{letter(i)}. {o} — {result['shares'][i]:.0%}" for i, o in enumerate(options)]
+    lines += ["", "Weights: " + ", ".join(f"{n} {w:.2f}" for n, w in
+                                         sorted(weights.items(), key=lambda kv: -kv[1])), ""]
     for n, v in votes.items():
-        lines.append(f"- {n} ({weights.get(n, 0):.2f}): {v['vote']} — {v['reason']}")
+        picked = ", ".join(letter(i) for i in v["support"]) or "none"
+        lines.append(f"- {n} ({weights.get(n, 0):.2f}): {picked} — {v['reason']}")
     return "\n".join(lines)
 
 
 # --------------------------------------------------------------------------- procedures
 
 
-async def run_cadence(score: Score, settings: Settings, resolution: str,
-                      proposed_by: str = "conscious", cadence_id: int | None = None,
-                      proposal: dict[str, Any] | None = None, confirm: bool = False) -> dict:
-    """Run both rounds through the workflow and record the result.
-
-    With `confirm=True` the workflow pauses before recording (status
-    `awaiting_confirm`); `confirm_cadence()` resumes it.
-    """
+async def run_cadence(score: Score, settings: Settings, question: str, options: list[str],
+                      called_by: str = "clerk") -> dict:
+    """Run both rounds through the workflow and record the result. The caller holds the slot."""
     from . import cadence_graph
 
+    cadence_id = None
     try:
-        if cadence_id is None:
-            cadence_id = await create_cadence(score, resolution, proposed_by, "running")
-        else:
-            await set_fields(score, cadence_id, status="running")
-        await cadence_graph.start(score, settings, cadence_id, resolution, proposed_by,
-                                  proposal=proposal, confirm=confirm)
+        cadence_id = await create_cadence(score, question, options, called_by, "running")
+        await cadence_graph.start(score, settings, cadence_id, question, options, called_by)
     finally:
-        await score.release_cadence()  # the caller claimed the slot
-    return await get_cadence(score, cadence_id)
-
-
-async def confirm_cadence(score: Score, settings: Settings, cadence_id: int) -> dict | None:
-    from . import cadence_graph
-
-    await cadence_graph.resume(score, settings, cadence_id, confirmed=True)
-    return await get_cadence(score, cadence_id)
-
-
-async def propose_cadence(score: Score, settings: Settings, proposer: str,
-                          resolution: str) -> dict | None:
-    """A voice proposes a cadence; all voices vote yes/no on whether to hold it now.
-
-    Only one cadence runs at a time: a proposal made while another is under way is
-    dropped (returns None) rather than queued, since the score will have moved on.
-    """
-    if not await score.claim_cadence():
-        log.info("proposal by %s dropped: a cadence is already under way", proposer)
-        return None
-    try:
-        return await _propose(score, settings, proposer, resolution)
-    except BaseException:
         await score.release_cadence()
-        raise
-
-
-async def _propose(score: Score, settings: Settings, proposer: str, resolution: str) -> dict:
-    cadence_id = await create_cadence(score, resolution, proposer, "proposed")
-    await score.append(proposer, "voice", f"I think we should decide this: {resolution}",
-                        mood="proposing", meta={"proposes_cadence": cadence_id})
-
-    key = await get_key(score.sessions)
-    specs = await load_voice_specs(score.sessions, settings)
-    answers = await asyncio.gather(*[
-        ask(score, settings, key, s, "listen",
-            prompts.proposal_system(key, proposer, resolution), "proposal")
-        for s in specs
-    ])
-    ballots = {}
-    for s, a in zip(specs, answers):
-        yes = bool(a and (a.get("yes") is True or str(a.get("yes")).lower() in ("true", "yes")))
-        ballots[s.name] = {"yes": yes, "reason": str((a or {}).get("reason") or "(no answer)")}
-    yes_count = sum(b["yes"] for b in ballots.values())
-    passed = yes_count > len(specs) / 2
-
-    if not passed:
-        await score.release_cadence()
-        await set_fields(score, cadence_id, status="rejected",
-                   result={"passed": False, "proposal": ballots},
-                   resolved_at=datetime.now(timezone.utc))
-        await score.append(
-            "cadence", "cadence",
-            f'Proposal by {proposer} not taken up ({yes_count} of {len(specs)} wanted to decide '
-            f'now): "{resolution}"',
-            meta={"cadence_id": cadence_id, "proposal": ballots, "passed": False},
-        )
-        return await get_cadence(score, cadence_id)
-
-    return await run_cadence(score, settings, resolution, proposer, cadence_id, proposal=ballots)
+    return await get_cadence(score, cadence_id)

@@ -29,6 +29,8 @@ STEPS: list[tuple[str, str]] = [
     ("senses.daily_at",
      "ALTER TABLE senses ADD COLUMN IF NOT EXISTS daily_at VARCHAR(5) NOT NULL DEFAULT '04:00'"),
     ("senses.every_minutes", "ALTER TABLE senses DROP COLUMN IF EXISTS every_minutes"),
+    ("cadences.options",
+     "ALTER TABLE cadences ADD COLUMN IF NOT EXISTS options JSONB NOT NULL DEFAULT '[]'"),
     ("drop frames (now keys, reseeded from mind/key.md)", "DROP TABLE IF EXISTS frames"),
 ]
 

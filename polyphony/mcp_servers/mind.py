@@ -25,9 +25,9 @@ from ..config import get_settings
 settings = get_settings()
 mcp = FastMCP(
     "polyphony",
-    instructions=("A room of voices with no chair. `say` drops a thought in; voices decide for "
-                  "themselves whether to answer, so read the score again after a while. "
-                  "`start_cadence` makes the voices vote on a resolution."),
+    instructions=("The voices of one mind, with no chair. `say` drops a theme in; voices decide "
+                  "for themselves whether to answer, so read the score again after a while. "
+                  "Votes are called by the clerk on its own; their results appear in the score."),
     host=settings.mcp_http_host,
     port=settings.mcp_http_port,
 )
@@ -53,15 +53,6 @@ async def read_score(after: int = 0, limit: int = 100) -> list[dict[str, Any]]:
         r = await c.get("/thoughts", params={"after": after, "limit": min(limit, 1000)})
         r.raise_for_status()
         return [{k: t[k] for k in ("seq", "author", "kind", "content", "mood")} for t in r.json()]
-
-
-@mcp.tool()
-async def start_cadence(resolution: str) -> dict[str, Any]:
-    """Start a formal vote on a resolution. The result appears in the score as a cadence thought."""
-    async with _client() as c:
-        r = await c.post("/cadence", json={"resolution": resolution})
-        r.raise_for_status()
-        return r.json()
 
 
 @mcp.tool()

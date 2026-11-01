@@ -17,10 +17,10 @@ from sqlalchemy import func, select
 
 from . import digest as digest_mod
 from . import llm, runtime_config
-from .cadence import confirm_cadence, create_cadence, get_cadence, run_cadence
+from .cadence import get_cadence
 from .config import Settings
 from .db import KeyRow, LLMCall, SenseRow, VoiceRow
-from .key import CONSCIOUS, KEY_ROW, get_key
+from .key import CONSCIOUS, get_key
 from .sense import DEFAULT_DAILY_AT, Sense, SenseSpec, check_daily_at
 from .score import Score
 from .voice import VoiceSpec
@@ -36,15 +36,6 @@ class ThoughtIn(BaseModel):
     content: str = Field(min_length=1)
     author: str = CONSCIOUS
     kind: str = "theme"  # "person" and "conscious" are accepted as older names
-
-
-class CadenceIn(BaseModel):
-    resolution: str = Field(min_length=1)
-    confirm: bool = False
-
-
-class KeyPatch(BaseModel):
-    text: str = Field(min_length=1)
 
 
 class VoiceIn(BaseModel):
@@ -124,7 +115,7 @@ def create_app(score: Score, settings: Settings, lifespan=None) -> FastAPI:
 
     @app.post("/pause")
     async def post_pause():
-        """Stop everything that calls a model: voices, senses, digest, cadences."""
+        """Stop everything that calls a model: voices, senses, digest, clerk and votes."""
         await score.set_paused(True)
         for t in list(background):
             t.cancel()
@@ -239,32 +230,6 @@ def create_app(score: Score, settings: Settings, lifespan=None) -> FastAPI:
 
     # ------------------------------------------------------------------ cadence
 
-    @app.post("/cadence")
-    async def post_cadence(c: CadenceIn):
-        await refuse_if_paused()
-        resolution = c.resolution.strip()
-        if not await score.claim_cadence():
-            raise HTTPException(409, "a cadence is already under way")
-        who = CONSCIOUS
-        try:
-            cid = await create_cadence(score, resolution, who, "running")
-        except BaseException:
-            await score.release_cadence()
-            raise
-        spawn(run_cadence(score, settings, resolution, who, cid, confirm=c.confirm))
-        return await get_cadence(score, cid)
-
-    @app.post("/cadence/{cid}/confirm")
-    async def post_confirm(cid: int):
-        await refuse_if_paused()
-        c = await get_cadence(score, cid)
-        if c is None:
-            raise HTTPException(404, "no such cadence")
-        if c["status"] != "awaiting_confirm":
-            raise HTTPException(409, f"cadence is {c['status']}, not awaiting_confirm")
-        spawn(confirm_cadence(score, settings, cid))
-        return {**c, "status": "running"}
-
     @app.get("/cadence/{cid}")
     async def get_one_cadence(cid: int):
         c = await get_cadence(score, cid)
@@ -335,32 +300,11 @@ def create_app(score: Score, settings: Settings, lifespan=None) -> FastAPI:
 
     @app.get("/key")
     async def read_key():
+        """What this mind is. Read-only: it comes from mind/key.md on every start."""
         return (await get_key(score.sessions)).to_dict()
 
-    @app.put("/key")
-    async def edit_key(k: KeyPatch):
-        text = k.text.strip()
-        if not text:
-            raise HTTPException(422, "key text is empty")
-        async with score.sessions() as s:
-            row = await s.get(KeyRow, KEY_ROW)
-            if row is None:
-                s.add(KeyRow(id=KEY_ROW, text=text))
-            else:
-                row.text = text
-            await s.commit()
-        await score.publish_control("key")
-        return {"text": text}
 
     # ------------------------------------------------------------------ digest
-
-    @app.post("/digest")
-    async def post_digest():
-        await refuse_if_paused()
-        t = await digest_mod.write_digest(score, settings)
-        if t is None:
-            raise HTTPException(409, "nothing new to digest")
-        return t
 
     @app.get("/digests")
     async def get_digests(limit: int = Query(20, ge=1, le=200)):

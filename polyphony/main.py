@@ -28,15 +28,20 @@ log = logging.getLogger("polyphony")
 
 
 async def seed(score: Score, settings: Settings) -> None:
-    """Load the key, voices and senses from `mind/` into the DB, only into empty tables.
+    """Load the key (always) and the voices and senses (only into empty tables) from `mind/`.
 
     The DB is the record of truth: once seeded, deleting a voice in the UI
     keeps it deleted across restarts.
     """
     async with score.sessions() as s:
-        if await s.get(KeyRow, KEY_ROW) is None:
-            s.add(KeyRow(id=KEY_ROW, text=Key.load(settings.key_file).text))
-            log.info("seeded key from %s", settings.key_file)
+        # The key is part of the mechanism, not a setting: mind/key.md wins on every start.
+        text = Key.load(settings.key_file).text
+        row = await s.get(KeyRow, KEY_ROW)
+        if row is None:
+            s.add(KeyRow(id=KEY_ROW, text=text))
+        elif row.text != text:
+            row.text = text
+        log.info("key loaded from %s", settings.key_file)
         if not await s.scalar(select(func.count()).select_from(VoiceRow)):
             n = 0
             for path in sorted(settings.voices_dir.glob("*/voice.md")):

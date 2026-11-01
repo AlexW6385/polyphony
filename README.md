@@ -6,8 +6,9 @@ Polyphony is the inside of a head, played out. Several AI agents, the *voices* o
 each with its own wants and temperament, read one shared *score* of thoughts and each decides
 for itself whether to add to it. Nobody schedules them, moderates them or tells them when to
 stop. You, the conscious part, drop a *theme* in; *senses* bring in news from feeds you chose;
-a *cadence* puts a resolution to a weighted vote; when the score goes quiet, a *digest* says what
-came out of it: a decision, or a clear map of where the voices stand.
+the *clerk* (not a voice) calls a *cadence*, a weighted vote between options drawn from the
+discussion; when the score goes quiet, a *digest* says what came out of it: a decision, or a
+clear map of where the voices stand.
 
 What a voice is lives in a sentence or two of text; what the whole mind is lives in one more
 text, the *key*. There is no topic object, no turn order, no loop cap. A voice that listens and
@@ -40,23 +41,24 @@ Without Docker: Python 3.12+, PostgreSQL 16, Redis 7, then
 | word | meaning |
 |---|---|
 | **voice** | one agent of the mind, defined by a sentence or two of text (`mind/voices/<name>/voice.md`) |
-| **key** | what this mind is and how its voices relate (`mind/key.md`); first in every prompt |
+| **key** | what this mind is and how its voices relate (`mind/key.md`); first in every prompt; part of the mechanism, reloaded from the file on every start, not editable from the page |
 | **score** | the one shared, ordered record of thoughts |
 | **theme** | a thought you drop in, as the conscious part |
 | **listen** | a voice reading the score and deciding whether to speak; it either speaks or **rests** |
-| **cadence** | a weighted vote on a resolution; one at a time, and everyone else waits |
+| **clerk** | not a voice: every 15 new thoughts, and after 30 s of quiet, decides whether a vote is due and drafts its question and two to four options |
+| **cadence** | the vote: voices weigh each other, then support any of the options; the top option wins with more than half; one at a time, everyone else waits |
 | **digest** | the outcome of a stretch of the score, written after 90 s of quiet |
 | **sense** | a standing instruction that brings news from your feeds in as `world` thoughts, once a day |
 
-The files under `mind/` seed the database on first start; after that, edit the key, voices and
-senses live from the page.
+The voices and senses under `mind/` seed the database on first start; after that, edit them live
+from the page. The key is always taken from `mind/key.md`.
 
 ## Models
 
 | tier | called | default |
 |---|---|---|
 | `listen` | every new thought, once per voice; the cadence rounds | `claude-haiku-5-5` |
-| `speak` | when a voice speaks; the digest; judges evals | `claude-sonnet-5-5` |
+| `speak` | when a voice speaks; the clerk; the digest; judges evals | `claude-sonnet-5-5` |
 | `sense` | picks and summarises news | the speak model |
 
 Prompts are laid out for the provider's prompt cache: the key and rules first, then the score
@@ -93,11 +95,11 @@ python -m polyphony.mcp_servers.mind           # stdio
 python -m polyphony.mcp_servers.mind --http    # streamable HTTP on 127.0.0.1:8001
 ```
 
-Tools: `say`, `read_score`, `start_cadence`, `list_voices` (over the HTTP API at `API_URL`).
+Tools: `say`, `read_score`, `list_voices` (over the HTTP API at `API_URL`).
 Claude Code: `claude mcp add polyphony -- python -m polyphony.mcp_servers.mind`.
 
 **No auth.** The HTTP API (via Compose) and the MCP HTTP transport listen on `127.0.0.1` only.
-Publishing either elsewhere lets anyone who can reach it drop themes in and start cadences.
+Publishing either elsewhere lets anyone who can reach it drop themes in.
 
 ## Evals
 
@@ -117,9 +119,9 @@ repetition, voice fidelity, engagement and convergence.
 | `POST /thoughts` | `{content}`: a theme (or `kind: "world"`) |
 | `GET /thoughts?after=&limit=` · `GET /score?after=` | the record; SSE replay then live |
 | `GET /listens` | every listen, spoken or rested |
-| `POST /cadence` `{resolution}` · `GET /cadence/{id}` | weighted vote; 409 while one is under way |
-| `GET/PUT /key` | what this mind is |
-| `POST /digest` · `GET /digests` | outcome summaries |
+| `GET /cadence/{id}` | a vote the clerk called: question, options, weights, votes, result |
+| `GET /key` | what this mind is (read-only) |
+| `GET /digests` | outcome summaries (written after 90 s of quiet) |
 | `POST /pause` · `POST /resume` · `GET /pause` | stop / restart everything that calls a model (the **Stop all** button) |
 | `GET /settings` | provider, API key, listen and speak models, monitoring charts |
 | `GET/PUT /config` · `POST /config/test/{listen\|speak}` | what the page reads and saves; the key is stored in the database and never returned |

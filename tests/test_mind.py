@@ -48,7 +48,6 @@ def polite_script():
 
 
 def _j(**kw):
-    kw.setdefault("propose_cadence", None)
     return json.dumps(kw)
 
 
@@ -135,8 +134,8 @@ async def test_voice_added_through_api_starts_listening(score, settings, mind, f
         assert "learn" not in mind.voices
 
 
-async def test_cadence_two_rounds(score, settings, fake):
-    await add_voices(score, "ride", "rest")
+def vote_script(supports):
+    """Standing gives ride more weight; each voice supports the options in `supports`."""
 
     async def script(system, user, json):
         me = voice_name(user)
@@ -144,50 +143,80 @@ async def test_cadence_two_rounds(score, settings, fake):
             return _j(weights={"ride": {"weight": 0.9, "why": "stake"},
                                "rest": {"weight": 0.3, "why": "meh"}})
         if "Second round: vote" in system:
-            return _j(vote="for" if me == "ride" else "against", reason=f"{me} says so")
+            return _j(support=supports[me], reason=f"{me} says so")
         raise AssertionError(system[:80])
 
-    fake.script = script
-    out = await cad.run_cadence(score, settings, "go cycling tomorrow")
-    assert out["status"] == "resolved"
-    assert out["result"]["passed"] is True
-    assert out["result"]["share_for"] == pytest.approx(0.75)
+    return script
+
+
+async def test_cadence_with_options(score, settings, fake):
+    await add_voices(score, "ride", "rest")
+    fake.script = vote_script({"ride": ["A", "C"], "rest": ["B"]})
+    assert await score.claim_cadence()
+    out = await cad.run_cadence(score, settings, "Tomorrow?", ["ride", "study", "ride, then study"])
+    assert out["status"] == "resolved" and out["options"][2] == "ride, then study"
+    assert out["result"]["shares"] == [pytest.approx(0.75), pytest.approx(0.25), pytest.approx(0.75)]
+    assert out["result"]["decided"] is False  # A and C tie
     last = (await score.thoughts())[-1]
-    assert last["kind"] == "cadence" and last["meta"]["votes"]["rest"]["vote"] == "against"
+    assert last["kind"] == "cadence" and last["meta"]["votes"]["rest"]["support"] == [1]
+    assert "UNDECIDED" in last["content"]
     assert not await score.cadence_running()
 
 
-async def test_cadence_proposal_rejected(score, settings, fake):
-    await add_voices(score, "ride", "rest", "make")
+async def test_clerk_calls_a_vote_when_due(score, settings, fake):
+    from polyphony import clerk as clerk_mod
+
+    await add_voices(score, "ride", "rest")
+    votes = vote_script({"ride": ["A"], "rest": ["A"]})
 
     async def script(system, user, json):
-        assert "is this worth deciding now" in system
-        return _j(yes=voice_name(user) == "ride", reason="r")
+        if "You are the clerk" in system:
+            return _j(call_vote=True, question="Tomorrow?", options=["ride", "study"])
+        return await votes(system, user, json)
 
     fake.script = script
-    out = await cad.propose_cadence(score, settings, "ride", "go now")
-    assert out["status"] == "rejected"
-    kinds = [(t["author"], t["kind"]) for t in await score.thoughts()]
-    assert kinds == [("ride", "voice"), ("cadence", "cadence")]
+    clerk = clerk_mod.Clerk(score, settings)
+    await score.append("conscious", "theme", "ride or study tomorrow?")
+    assert not await clerk.tick()  # first look only marks where it starts
+    for i in range(clerk_mod.CHECK_EVERY - 1):
+        await score.append("ride", "voice", f"point {i}")
+        assert not await clerk.tick()  # not quiet, not 15 new yet
+    await score.append("rest", "voice", "last point")
+    assert await clerk.tick()  # 15 new thoughts: checked, and a vote ran
+    last = (await score.thoughts())[-1]
+    assert last["kind"] == "cadence" and "DECIDED: A. ride" in last["content"]
+    assert not await clerk.tick()  # nothing new since
+
+    # quiet after new talk also triggers a check; the clerk may decline to call a vote
+    async def no_vote(system, user, json):
+        assert "You are the clerk" in system
+        return _j(call_vote=False, question="", options=[])
+
+    fake.script = no_vote
+    await score.append("ride", "voice", "one more thing")
+    monkey = clerk_mod.QUIET_SECONDS
+    clerk_mod.QUIET_SECONDS = 0
+    try:
+        assert await clerk.tick()
+    finally:
+        clerk_mod.QUIET_SECONDS = monkey
+    assert (await score.thoughts())[-1]["kind"] == "voice"  # no vote this time
 
 
-async def test_api_cadence_runs_in_background(score, settings, fake):
-    await add_voices(score, "ride")
+async def test_clerk_waits_while_a_vote_is_under_way(score, settings, fake):
+    from polyphony import clerk as clerk_mod
+
+    await add_voices(score, "ride", "rest")
 
     async def script(system, user, json):
-        if "standing" in system:
-            return _j(weights={"ride": 1})
-        return _j(vote="for", reason="yes")
+        return _j(call_vote=True, question="Tomorrow?", options=["ride", "study"])
 
     fake.script = script
-    app = create_app(score, settings)
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
-        cid = (await c.post("/cadence", json={"resolution": "ride"})).json()["id"]
-        for _ in range(50):
-            if (await c.get(f"/cadence/{cid}")).json()["status"] == "resolved":
-                break
-            await asyncio.sleep(0.1)
-        assert (await c.get(f"/cadence/{cid}")).json()["result"]["passed"]
+    assert await score.claim_cadence()  # something is already under way
+    assert await clerk_mod.Clerk(score, settings).check() is None
+    assert not [t for t in await score.thoughts() if t["kind"] == "cadence"]
+    await score.release_cadence()
+    assert not await score.cadence_running()
 
 
 class FakeMCP:
@@ -264,31 +293,18 @@ async def test_digest_summarises_and_does_not_wake_voices(score, mind, fake, set
     assert await write_digest(score, settings) is None  # nothing new since
 
 
-async def test_cadence_confirm_pauses_then_records(score, settings, fake):
-    await add_voices(score, "ride")
+async def test_key_comes_from_the_file_and_is_read_only(score, settings, fake):
+    from polyphony.main import seed
 
-    async def script(system, user, json):
-        if "standing" in system:
-            return _j(weights={"ride": 1})
-        return _j(vote="for", reason="yes")
-
-    fake.script = script
-    out = await cad.run_cadence(score, settings, "ride now", confirm=True)
-    assert out["status"] == "awaiting_confirm"
-    assert not [t for t in await score.thoughts() if t["kind"] == "cadence"]
-    assert not await score.cadence_running()
-    out = await cad.confirm_cadence(score, settings, out["id"])
-    assert out["status"] == "resolved"
-    assert [t for t in await score.thoughts() if t["kind"] == "cadence"]
-
-
-async def test_key_edit_via_api(score, settings, fake):
+    settings.key_file.parent.mkdir(parents=True, exist_ok=True)
+    settings.key_file.write_text("Voices of one mind.")
+    await seed(score, settings)
+    settings.key_file.write_text("Voices of one mind, revised.")
+    await seed(score, settings)  # every start copies the file again
     app = create_app(score, settings)
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
-        r = await c.put("/key", json={"text": "Voices of one mind."})
-        assert r.json() == {"text": "Voices of one mind."}
-        assert (await c.get("/key")).json()["text"] == "Voices of one mind."
-        assert (await c.put("/key", json={"text": "  "})).status_code == 422
+        assert (await c.get("/key")).json()["text"] == "Voices of one mind, revised."
+        assert (await c.put("/key", json={"text": "x"})).status_code == 405
 
 
 async def test_sse_replays_and_streams(score, settings, fake):
@@ -360,7 +376,6 @@ async def test_pause_stops_everything_and_resume_restarts(score, settings, mind,
         async for k in score.redis.scan_iter(match=f"{score.namespace}:*"):
             await score.redis.delete(k)
         assert await score.paused()
-        assert (await c.post("/cadence", json={"resolution": "go"})).status_code == 409
 
         # a thought still lands while paused, but nobody answers it
         await c.post("/thoughts", json={"content": "anyone there?"})
@@ -373,18 +388,6 @@ async def test_pause_stops_everything_and_resume_restarts(score, settings, mind,
                 break
             await asyncio.sleep(0.1)
         assert sorted(mind.voices) == ["make", "rest", "ride"]
-
-
-async def test_only_one_cadence_at_a_time(score, settings, fake):
-    await add_voices(score, "ride", "rest")
-    assert await score.claim_cadence()  # something is already under way
-    assert await cad.propose_cadence(score, settings, "ride", "go now") is None
-    assert not [t for t in await score.thoughts() if t["kind"] == "voice"]
-    app = create_app(score, settings)
-    async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://t") as c:
-        assert (await c.post("/cadence", json={"resolution": "go"})).status_code == 409
-    await score.release_cadence()
-    assert not await score.cadence_running()
 
 
 async def test_config_api_saves_models_and_never_returns_keys(score, settings):

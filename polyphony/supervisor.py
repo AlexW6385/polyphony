@@ -5,7 +5,8 @@ on the control channel. On a change it diffs the tables against what is
 running and starts, stops, or restarts (text changed) the affected tasks. A
 key edit changes every voice's fingerprint, so all voices restart with it.
 
-It also runs the edge component that is not per-row: the digester. While the room is paused (`Score.set_paused`) it
+It also runs the edge components that are not per-row: the digester and the
+clerk (which calls votes). While the room is paused (`Score.set_paused`) it
 runs nothing at all: every voice, sense and edge component is stopped until
 it is resumed.
 This is what makes "add a voice from the UI" work without a restart, and it
@@ -21,9 +22,9 @@ from dataclasses import dataclass
 from sqlalchemy import select
 
 from . import runtime_config
-from .cadence import propose_cadence
 from .config import Settings
 from .db import SenseRow
+from .clerk import Clerk
 from .digest import Digester
 from .key import get_key
 from .sense import Sense, SenseSpec
@@ -50,12 +51,6 @@ class Supervisor:
         self.senses: dict[str, _Running] = {}
         self.edges: list[asyncio.Task] = []
         self._lock = asyncio.Lock()
-
-    async def _propose(self, proposer: str, resolution: str):
-        try:
-            return await propose_cadence(self.score, self.settings, proposer, resolution)
-        except Exception:
-            log.exception("cadence proposal by %s failed", proposer)
 
     async def sync(self) -> None:
         async with self._lock:
@@ -85,7 +80,7 @@ class Supervisor:
                 )
 
     def _make_voice(self, spec, key):
-        return Voice(spec, self.score, self.settings, self._propose, key).run()
+        return Voice(spec, self.score, self.settings, key).run()
 
     async def _diff(self, running: dict[str, _Running], wanted: dict[str, str], make, kind: str):
         for name in list(running):
@@ -116,6 +111,9 @@ class Supervisor:
         if self.settings.run_digest:
             self.edges.append(asyncio.create_task(Digester(self.score, self.settings).run(),
                                                   name="digest"))
+        if self.settings.run_clerk:
+            self.edges.append(asyncio.create_task(Clerk(self.score, self.settings).run(),
+                                                  name="clerk"))
 
     async def run(self) -> None:
         await self.sync()

@@ -1,8 +1,9 @@
 """The key: text saying what this mind is and how its voices relate.
 
 It is placed first in every system prompt. Everything after it is engine text
-and is framing-neutral. The key lives in the `keys` table (seeded from
-`mind/key.md`) and can be edited live.
+and is framing-neutral. The key is part of the mechanism, not a setting: it is
+copied from `mind/key.md` into the `keys` table on every start and is not
+editable from the page.
 
 The human participant is the conscious part of the mind: what it drops in is a
 theme, labelled `conscious` in every prompt.

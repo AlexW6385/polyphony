@@ -9,7 +9,7 @@ from polyphony.cadence import average_weights, tally
 from polyphony.config import TierConfig
 from polyphony.llm import CACHE_BREAK, CHUNK, LLMError, extract_json, resolve_tier
 from polyphony.sense import fingerprints
-from polyphony.voice import VoiceSpec, normalize_decision, repeats_proposal
+from polyphony.voice import VoiceSpec, normalize_decision
 
 
 def test_extract_json_from_chatty_reply():
@@ -52,39 +52,8 @@ def test_voice_without_front_matter():
 
 
 def test_normalize_decision_is_lenient():
-    d = normalize_decision({"speak": "yes", "pause_seconds": "3", "propose_cadence": "null"})
-    assert d == {"speak": True, "mood": "", "reason": "", "pause_seconds": 3.0,
-                 "propose_cadence": None}
-
-
-@pytest.mark.parametrize("raw", [
-    "a resolution, phrased so it can be voted for or against",
-    '"A resolution, phrased so it can be voted for or against."',
-    "cadence",
-    "I think we should decide this: a resolution, phrased so it can be voted for or against",
-    "Cadence on: 'a resolution, phrased so it can be voted for or against'",
-])
-def test_normalize_decision_drops_placeholder_proposals(raw):
-    assert normalize_decision({"propose_cadence": raw})["propose_cadence"] is None
-
-
-def test_normalize_decision_keeps_real_proposals():
-    d = normalize_decision({"propose_cadence": " I think we should decide this: 明早骑车 "})
-    assert d["propose_cadence"] == "明早骑车"
-
-
-def test_repeats_proposal_only_looks_at_proposals_and_cadences():
-    recent = [
-        {"seq": 1, "kind": "voice", "author": "doubt", "content": "Let's vote on: ride at 7."},
-        {"seq": 2, "kind": "voice", "author": "ride",
-         "content": "I think we should decide this: skip class and ride"},
-        {"seq": 3, "kind": "cadence", "author": "cadence",
-         "content": 'Proposal by learn not taken up (0 of 3): "study all Saturday"'},
-    ]
-    assert repeats_proposal("Skip class and ride.", recent)
-    assert repeats_proposal("study all Saturday", recent)
-    assert not repeats_proposal("ride at 7", recent)
-
+    d = normalize_decision({"speak": "yes", "pause_seconds": "3"})
+    assert d == {"speak": True, "mood": "", "reason": "", "pause_seconds": 3.0}
 
 def test_average_weights_normalises():
     names = ["a", "b"]
@@ -100,11 +69,21 @@ def test_average_weights_all_zero_is_equal():
     assert average_weights(["a", "b"], [None]) == {"a": 0.5, "b": 0.5}
 
 
-def test_tally_ignores_abstain_in_share():
-    r = tally({"a": 0.5, "b": 0.3, "c": 0.2},
-              {"a": {"vote": "for"}, "b": {"vote": "against"}, "c": {"vote": "abstain"}})
-    assert r["share_for"] == pytest.approx(0.5 / 0.8, abs=1e-3) and r["passed"]
+def test_tally_multi_option_approval():
+    from polyphony.cadence import _normalize_vote
 
+    opts = ["ride", "study", "both"]
+    w = {"a": 0.5, "b": 0.3, "c": 0.2}
+    votes = {"a": _normalize_vote({"support": ["C"], "reason": "x"}, opts),
+             "b": _normalize_vote({"support": ["b", "3"], "reason": "x"}, opts),
+             "c": _normalize_vote(None, opts)}  # no answer: not counted
+    r = tally(w, votes, opts)
+    assert r["shares"] == [0.0, pytest.approx(0.375), 1.0] and r["winner"] == 2 and r["decided"]
+    # a tie at the top, or nothing above half, decides nothing
+    tie = {"a": {"support": [0], "reason": ""}, "b": {"support": [1], "reason": ""}}
+    assert not tally({"a": 0.5, "b": 0.5}, tie, opts)["decided"]
+    low = {"a": {"support": [0], "reason": ""}, "b": {"support": [], "reason": ""}}
+    assert not tally({"a": 0.4, "b": 0.6}, low, opts)["decided"]
 
 def test_fingerprints_match_on_url_or_title():
     a = fingerprints({"title": "Big News", "url": "https://www.x.com/a/"})

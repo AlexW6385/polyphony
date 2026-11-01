@@ -85,9 +85,10 @@ class Cadence(Base):
     __tablename__ = "cadences"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    resolution: Mapped[str] = mapped_column(Text)
-    proposed_by: Mapped[str] = mapped_column(String(64))
-    status: Mapped[str] = mapped_column(String(16))  # proposed | rejected | running | resolved
+    resolution: Mapped[str] = mapped_column(Text)  # the question put to the vote
+    options: Mapped[list[str]] = mapped_column(JSONB, default=list, server_default="[]")
+    proposed_by: Mapped[str] = mapped_column(String(64))  # who called it: the clerk
+    status: Mapped[str] = mapped_column(String(16))  # running | resolved
     weights: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     votes: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
     result: Mapped[dict[str, Any] | None] = mapped_column(JSONB, nullable=True)
@@ -98,6 +99,7 @@ class Cadence(Base):
         return {
             "id": self.id,
             "resolution": self.resolution,
+            "options": list(self.options or []),
             "proposed_by": self.proposed_by,
             "status": self.status,
             "weights": self.weights,

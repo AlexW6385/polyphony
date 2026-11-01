@@ -1,14 +1,12 @@
 """The cadence procedure as a LangGraph workflow with a checkpointer.
 
-    standing (fan-out) -> weights -> vote (fan-out) -> tally -> [confirm] -> record
+    standing (fan-out) -> weights -> vote (fan-out) -> tally -> record
 
 - Each node's output is checkpointed (PostgreSQL in production, memory in
   tests), keyed by thread `cadence-<id>`. After a crash or restart,
   `resume_unfinished()` continues every running cadence from its last
   finished step: voices that already answered a finished round are not asked
   again.
-- `confirm`: the workflow interrupts before `record` until the conscious part
-  confirms (`POST /cadence/{id}/confirm`).
 
 LangGraph is used here because this is a fixed, multi-step, stateful
 procedure. It never coordinates the voices themselves.
@@ -23,7 +21,6 @@ from typing import Any, TypedDict
 
 from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
-from langgraph.types import Command, interrupt
 from sqlalchemy import select
 
 from . import prompts
@@ -47,10 +44,9 @@ log = logging.getLogger(__name__)
 
 class CadenceState(TypedDict, total=False):
     cadence_id: int
-    resolution: str
-    proposed_by: str
-    proposal: dict[str, Any] | None
-    confirm: bool
+    question: str
+    options: list[str]
+    called_by: str
     names: list[str]
     proposals: dict[str, Any]
     weights: dict[str, float]
@@ -101,7 +97,7 @@ def build(score: Score, settings: Settings):
         names = [s.name for s in specs]
         answers = await asyncio.gather(*[
             ask(score, settings, key, s, "listen",
-                prompts.standing_system(key, state["resolution"], names),
+                prompts.standing_system(key, state["question"], state["options"], names),
                 "standing")
             for s in specs
         ])
@@ -119,37 +115,28 @@ def build(score: Score, settings: Settings):
                  if s.name in state["names"]]
         answers = await asyncio.gather(*[
             ask(score, settings, key, s, "listen",
-                prompts.vote_system(key, state["resolution"], state["weights"]),
+                prompts.vote_system(key, state["question"], state["options"], state["weights"]),
                 "vote")
             for s in specs
         ])
-        votes = {s.name: _normalize_vote(a) for s, a in zip(specs, answers)}
-        for n in state["names"]:  # a voice removed mid-cadence abstains
-            votes.setdefault(n, _normalize_vote(None))
+        votes = {s.name: _normalize_vote(a, state["options"]) for s, a in zip(specs, answers)}
+        for n in state["names"]:  # a voice removed mid-cadence does not count
+            votes.setdefault(n, _normalize_vote(None, state["options"]))
         return {"votes": votes}
 
     async def count(state: CadenceState) -> CadenceState:
-        result = tally(state["weights"], state["votes"])
-        if state.get("proposal") is not None:
-            result["proposal"] = state["proposal"]
+        result = tally(state["weights"], state["votes"], state["options"])
         await set_fields(score, state["cadence_id"], votes=state["votes"], result=result)
         return {"result": result}
-
-    async def confirm(state: CadenceState) -> CadenceState:
-        if state.get("confirm"):
-            await set_fields(score, state["cadence_id"], status="awaiting_confirm")
-            await score.set_cadence_running(state["cadence_id"], False)
-            interrupt({"cadence_id": state["cadence_id"], "result": state["result"]})
-        return {}
 
     async def record(state: CadenceState) -> CadenceState:
         cid = state["cadence_id"]
         await set_fields(score, cid, status="resolved", resolved_at=datetime.now(timezone.utc))
         await score.set_cadence_running(cid, False)
-        content = summarize(state["resolution"], state["proposed_by"], state["weights"],
+        content = summarize(state["question"], state["options"], state["weights"],
                             state["votes"], state["result"])
-        meta = {"cadence_id": cid, "resolution": state["resolution"],
-                "proposed_by": state["proposed_by"], "weights": state["weights"],
+        meta = {"cadence_id": cid, "question": state["question"], "options": state["options"],
+                "called_by": state["called_by"], "weights": state["weights"],
                 "votes": state["votes"], "result": state["result"]}
         # Appended after the running flag is cleared, so this thought wakes the voices.
         await score.append("cadence", "cadence", content, meta=meta)
@@ -157,14 +144,13 @@ def build(score: Score, settings: Settings):
 
     g = StateGraph(CadenceState)
     for name, fn in [("standing", standing), ("weights", weights), ("vote", vote),
-                     ("tally", count), ("confirm", confirm), ("record", record)]:
+                     ("tally", count), ("record", record)]:
         g.add_node(name, fn)
     g.add_edge(START, "standing")
     g.add_edge("standing", "weights")
     g.add_edge("weights", "vote")
     g.add_edge("vote", "tally")
-    g.add_edge("tally", "confirm")
-    g.add_edge("confirm", "record")
+    g.add_edge("tally", "record")
     g.add_edge("record", END)
     return g.compile(checkpointer=_checkpointer)
 
@@ -172,22 +158,21 @@ def build(score: Score, settings: Settings):
 async def _empty(score: Score, settings: Settings, cadence_id: int) -> bool:
     if await load_voice_specs(score.sessions, settings):
         return False
-    result = {"for": 0, "against": 0, "abstain": 0, "share_for": None, "passed": False}
+    result = {"shares": [], "winner": None, "decided": False}
     await set_fields(score, cadence_id, status="resolved", weights={}, votes={}, result=result,
                      resolved_at=datetime.now(timezone.utc))
     return True
 
 
-async def start(score: Score, settings: Settings, cadence_id: int, resolution: str,
-                proposed_by: str, *, proposal: dict[str, Any] | None = None,
-                confirm: bool = False) -> None:
+async def start(score: Score, settings: Settings, cadence_id: int, question: str,
+                options: list[str], called_by: str) -> None:
     if await _empty(score, settings, cadence_id):
         return
     await score.set_cadence_running(cadence_id, True)
     try:
         await build(score, settings).ainvoke(
-            {"cadence_id": cadence_id, "resolution": resolution, "proposed_by": proposed_by,
-             "proposal": proposal, "confirm": confirm},
+            {"cadence_id": cadence_id, "question": question, "options": options,
+             "called_by": called_by},
             _config(cadence_id),
         )
     finally:
@@ -196,9 +181,8 @@ async def start(score: Score, settings: Settings, cadence_id: int, resolution: s
             await score.set_cadence_running(cadence_id, False)
 
 
-async def resume(score: Score, settings: Settings, cadence_id: int,
-                 confirmed: bool = False) -> None:
-    """Continue a cadence from its last checkpoint (after a crash, or after confirm)."""
+async def resume(score: Score, settings: Settings, cadence_id: int) -> None:
+    """Continue a cadence from its last checkpoint, after a crash or restart."""
     graph = build(score, settings)
     snap = await graph.aget_state(_config(cadence_id))
     if not snap or not snap.next:
@@ -206,8 +190,7 @@ async def resume(score: Score, settings: Settings, cadence_id: int,
     await set_fields(score, cadence_id, status="running")
     await score.set_cadence_running(cadence_id, True)
     try:
-        payload = Command(resume=True) if confirmed else None
-        await graph.ainvoke(payload, _config(cadence_id))
+        await graph.ainvoke(None, _config(cadence_id))
     finally:
         await score.set_cadence_running(cadence_id, False)
 
