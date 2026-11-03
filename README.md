@@ -215,6 +215,4 @@ TEST_REDIS_URL=redis://localhost:6379/15 pytest
 
 Real PostgreSQL and Redis, a scripted fake model, a fake MCP client.
 
-Grew out of [multi-agent-chat-system](https://github.com/AlexW6385/multi-agent-chat-system).
-
 MIT

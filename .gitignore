@@ -9,3 +9,4 @@ data/
 reports/
 evals/results/
 .DS_Store
+dump.rdb
