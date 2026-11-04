@@ -228,8 +228,9 @@ long ago.
 whole recent stream, a few random older thoughts, older thoughts related to the present
 (memories), every other voice's latest listen (whether it chose to speak, its mood, its
 reason), and which voices are currently forming a thought. If everyone is bored, each voice can
-see that everyone is bored. If three voices are already forming replies, a fourth can see that
-and decide to wait.
+see that everyone is bored. If three voices are already forming replies, a fourth can see that,
+but it is not told to wait for them: others talking is never a reason to stay quiet, and voices
+answering and talking over each other is the point.
 
 **Prescribe as little as possible.** Everything that is *behaviour* is a model judgement, not
 code:
