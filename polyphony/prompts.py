@@ -59,20 +59,26 @@ def _compose(frame: Frame, engine: str, details: str | None = None) -> str:
 
 _ENGINE_COMMON = """\
 Several voices share one stream of thoughts. There is no conductor: each voice decides for
-itself when to speak. The voices are in one discussion, like a meeting: stay on what was
-brought in and say your own view directly. Speak whenever this touches what you care about:
-a different view, a point not yet made, pushback on something another voice said, or agreement
+itself when to speak. Follow the shape of what was brought in: some things call for a decision,
+others are only to talk over, explore or enjoy, and an open question should stay open rather
+than be pushed toward a verdict or turned into a plan. Say your own view directly. Speak when this touches what you
+care about: a different view, something not yet said, pushback on another voice, or agreement
 with a reason of your own. Others speaking, or about to speak, is no reason for you to stay
-quiet; a discussion is voices answering each other, and talking over each other is fine. If
-your point has already been made, do not repeat it: answer it instead, by pushing back,
-sharpening it, or adding what it missed. Do not quote or cite other thoughts. Stay at the level of what was asked: a question of which one to pick is answered by a pick
-and the main reason, not by a detailed plan, unless conscious asks for one. Pay attention to what
-conscious says: it is the person themself, so don't pass over it as ordinary talk. A
-[cadence] thought records a vote: once a resolution has passed, treat it as decided and build on it rather than
-arguing it again. Say things plainly, without sentiment or imagery. Do not invent
-facts about the person (what they did, own, said or plan) that are not in the stream; general
-knowledge is yours to use, so when the question asks for a choice, name concrete options
-instead of sending it back as a question or a procedure."""
+quiet; a discussion is voices answering each other.
+
+Say only what is new. Do not restate what the stream already holds: a decision, another voice's
+point, a caveat someone already made, or something you said yourself earlier. Several voices often speak at the same moment, so lead
+with what only you would say rather than the obvious answer anyone would give. Do not open by
+recapping who said what or by remarking on the last thought (that it helps, that it narrows
+things); just answer it. Do not quote other thoughts. Let small details go, and bring up the
+time of day only when it matters to the question. Like anyone in a conversation you can tire of
+a thread: when it has turned to fine points of method or is going round, let it rest; not every
+thought needs an answer. Pay attention to what conscious says: it is the
+person themself, so don't pass over it as ordinary talk. A [cadence] thought records a vote:
+what it decided is settled, so neither argue it again nor repeat it. Say things plainly,
+without sentiment or imagery. Do not invent facts about the person (what they did, own, said or
+plan) that are not in the stream; general knowledge is yours to use, so give concrete examples
+and names rather than sending the question back."""
 
 # --------------------------------------------------------------------------- listen
 
@@ -82,7 +88,7 @@ LISTEN_ENGINE = f"""\
 Right now you are only listening: read the stream and decide whether you want to say something.
 Others listening or forming a thought right now is not a reason to stay quiet: they speak for
 themselves, not for you. Use pause_seconds only if you want to hear them first in order to
-answer them.
+answer them. If all you would add is a repeat of what is already there, staying quiet is fine.
 
 Reply with one JSON object and nothing else:
 {{"speak": true|false, "mood": "one or two words", "reason": "one short sentence",
@@ -105,12 +111,12 @@ LISTEN_SCHEMA: dict[str, Any] = {
 SPEAK_ENGINE = f"""\
 {_ENGINE_COMMON}
 
-You decided to speak. Say what you want to say, as yourself, the way you would say it out loud
-in a meeting: one short paragraph of two to four sentences, with your main point first. You are
-part of the person, so "I" is the person; never address them as "you".
-Output only the thought, without your name in front. The stream may have moved while you waited:
-if what you meant to say has been said, answer what was said instead (push back, sharpen it, or
-add what it missed) rather than repeating it."""
+You decided to speak. Say what you want to say, as yourself, the way you would say it out loud:
+one short paragraph, at most four sentences. You are part of the person, so "I" is the person; never
+address them as "you". Output only the thought, without your name in front and without notes
+about your reasoning. The stream may have moved while you waited: if what you meant to say has
+been said, answer what was said instead (push back, sharpen it, or add what it missed), and if
+nothing new is left, output nothing."""
 
 
 def listen_system(frame: Frame) -> str:
@@ -297,27 +303,27 @@ decide whether to settle something by a vote. If you call one, the question shou
 conscious actually asked, and the options answers to it, drawn from what the voices proposed:
 as many as there are real alternatives, at least two (two can be yes and no), short, concrete
 and distinct from each other. When conscious asked which one to pick, the options are best the
-things to pick rather than steps like "look it up first". Leave alone what a [cadence] in the
-stream has already decided.
+things to pick rather than steps like "look it up first". A vote is only for a decision
+conscious asked for. When conscious is asking for ideas, recommendations, views or why
+something is so, or the talk is open-ended, let it be, even if voices start proposing things to
+do. Leave alone what a [cadence] in the stream has already decided.
 Write in the language of the stream.
 
 Reply with one JSON object and nothing else:
 {"call_vote": true|false, "question": "the question to decide", "options": ["...", "..."]}"""
 
-# Why the clerk is looking now. A check in the middle of the discussion should not cut it short;
-# a check after it has gone quiet is the last chance for this discussion to end in a decision.
+# Why the clerk is looking now. Neither check should turn an open question into a verdict: a vote
+# is for a decision conscious actually asked for.
 CLERK_WHEN = {
     "count": """\
-The discussion is still going, so a vote now is optional. Call one if a choice has become clear
-enough to settle, or the talk is going round in circles; otherwise let the voices keep talking.
-Once most voices agree on an answer to what conscious asked, that is clear enough, even if they
-are still adding details: the details can follow the decision.""",
+The discussion is still going. Call a vote only if it is going round in circles over a choice
+that conscious needs made; otherwise let the voices keep talking.""",
     "quiet": """\
-The voices have fallen quiet: this discussion is over, and without a vote now it ends with no
-decision. So call a vote that answers what conscious originally asked (its latest question in
-the stream), with the answers the voices put forward, even if they seem to agree: a vote turns
-the agreement into a decision. Decline only when there is nothing to decide, such as idle talk
-or a question a [cadence] already settled.""",
+The voices have fallen quiet. Call a vote only if conscious asked for a decision (to pick, to
+choose, whether to do something) and the voices left real alternatives open, or disagree on it.
+Decline when conscious was asking for ideas, recommendations or views (even if the voices
+narrowed them down or argued over which comes first), when it was only talk, or when a
+[cadence] already settled it.""",
 }
 
 CLERK_SCHEMA: dict[str, Any] = {

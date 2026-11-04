@@ -18,6 +18,7 @@ import hashlib
 import json
 import logging
 import random
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -231,6 +232,7 @@ class Voice:
                 tier_name="speak", purpose="speak", voice=self.name,
                 web_search=self.settings.speak_web_search,
             )
+            text = strip_reasoning(text)
             if text:
                 await self.stream.append(self.name, "voice", text, mood=decision["mood"])
             else:
@@ -240,6 +242,14 @@ class Voice:
         # The wake flag is NOT cleared here: anything that landed while we were
         # forming triggers one fresh listen against the newest state.
         return decision
+
+_REASONING = re.compile(r"<(reasoning|thinking)>.*?</\1>\s*", re.S | re.I)
+
+
+def strip_reasoning(text: str | None) -> str:
+    """Drop reasoning a model sometimes writes into its reply as <reasoning>...</reasoning>."""
+    return _REASONING.sub("", text or "").strip()
+
 
 def normalize_decision(d: dict[str, Any]) -> dict[str, Any]:
     """Coerce a listen reply into the exact schema; models are loose with types."""

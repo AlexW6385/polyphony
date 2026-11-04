@@ -190,7 +190,7 @@ async def test_clerk_calls_a_vote_when_due(stream, settings, fake):
 
     # quiet after new talk also triggers a check; the clerk may decline to call a vote
     async def no_vote(system, user, json):
-        assert "You are the clerk" in system and "this discussion is over" in system
+        assert "You are the clerk" in system and "fallen quiet" in system
         return _j(call_vote=False, question="", options=[])
 
     fake.script = no_vote
